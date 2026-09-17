@@ -33,6 +33,16 @@
 - This repository's GitHub Actions workflow rebuilds the APK against the latest official core binding (daily check + on push), so updates always carry the newest core. ورک‌فلو CI این ریپو به‌صورت خودکار APK را با جدیدترین هسته بازسازی می‌کند
 - When a newer build is available the app shows an update banner on launch with a direct download. با وجود نسخه جدید، بنر آپدیت مستقیم نمایش داده می‌شود
 
+
+## 🤖 Enabling the CI auto-build pipeline | فعال‌سازی بیلد خودکار
+
+The GitHub Actions workflow is shipped as `docs/ci-workflow.yml.example`. To enable automatic APK builds (with the latest official Xray core) on every push and daily:
+
+1. Move it: `docs/ci-workflow.yml.example` → `.github/workflows/build.yml` (via the GitHub web UI: *Add file → Create new file → `.github/workflows/build.yml`*, paste the content)
+2. Done — Actions will build signed APKs on every push and daily, and can publish releases via `workflow_dispatch` with a tag.
+
+ورک‌فلو CI در مسیر بالا آماده است؛ کافیست آن را به `.github/workflows/build.yml` منتقل کنید تا بیلد خودکار فعال شود.
+
 ## 🛠️ Building from source | بیلد از سورس
 
 ```bash
