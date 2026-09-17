@@ -1,0 +1,120 @@
+name: Build Zero VPN APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        required: false
+        type: string
+  push:
+    branches:
+      - master
+      - main
+  schedule:
+    # Daily check — rebuilds with the latest official Xray core when the
+    # AndroidLibXrayLite submodule advances (core auto-update pipeline).
+    - cron: '0 3 * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
+        fetch-depth: '0'
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      with:
+        cmdline-tools-version: '14742923'
+        packages: 'platforms;android-37.0 build-tools;37.0.0 platform-tools'
+
+    - name: Install NDK
+      run: |
+        echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+          --channel=0 \
+          --install "ndk;29.0.14206865"
+        echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
+
+    - name: Build libhevtun
+      run: |
+        export NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865
+        bash compile-hevtun.sh
+
+    - name: Copy libhevtun
+      run: |
+        cp -r ${{ github.workspace }}/libs ${{ github.workspace }}/V2rayNG/app
+
+    - name: Fetch AndroidLibXrayLite tag
+      run: |
+        pushd AndroidLibXrayLite
+        CURRENT_TAG=$(git describe --tags --abbrev=0)
+        echo "Current tag in this repo: $CURRENT_TAG"
+        echo "CURRENT_TAG=$CURRENT_TAG" >> $GITHUB_ENV
+        popd
+
+    - name: Download libv2ray (official Xray core binding)
+      uses: robinraju/release-downloader@v1.12
+      with:
+        repository: '2dust/AndroidLibXrayLite'
+        tag: ${{ env.CURRENT_TAG }}
+        fileName: 'libv2ray.aar'
+        out-file-path: V2rayNG/app/libs/
+
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '21'
+
+    - name: Generate release keystore
+      run: |
+        mkdir -p ${{ github.workspace }}/signing
+        if [ ! -f ${{ github.workspace }}/signing/zero-vpn.jks ]; then
+          keytool -genkeypair -v \
+            -keystore ${{ github.workspace }}/signing/zero-vpn.jks \
+            -storepass zerovpn123 -keypass zerovpn123 \
+            -alias zerovpn -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Zero VPN, OU=Zero VPN, O=Zero VPN, L=Tehran, C=IR"
+        fi
+
+    - name: Build APK
+      run: |
+        cd ${{ github.workspace }}/V2rayNG
+        echo "sdk.dir=${ANDROID_HOME}" > local.properties
+        chmod 755 gradlew
+        ./gradlew assemblePlaystoreRelease \
+          -Pandroid.injected.signing.store.file=${{ github.workspace }}/signing/zero-vpn.jks \
+          -Pandroid.injected.signing.store.password=zerovpn123 \
+          -Pandroid.injected.signing.key.alias=zerovpn \
+          -Pandroid.injected.signing.key.password=zerovpn123
+
+    - name: Upload APK artifacts
+      uses: actions/upload-artifact@v4
+      if: success()
+      with:
+        name: ZeroVPN-apks
+        path: V2rayNG/app/build/outputs/apk/playstore/release/*.apk
+
+    - name: Release (workflow_dispatch with tag)
+      if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ inputs.release_tag }}
+        name: Zero VPN ${{ inputs.release_tag }}
+        body: |
+          Zero VPN release ${{ inputs.release_tag }}
+
+          - Xray core: ${{ env.CURRENT_TAG }} (official, embedded via libv2ray)
+          - Auto core-update check on every app launch
+          - Persian & English UI
+
+          Install the universal APK, or pick your device ABI.
+        files: |
+          V2rayNG/app/build/outputs/apk/playstore/release/*.apk
