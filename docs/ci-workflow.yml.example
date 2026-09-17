@@ -18,6 +18,11 @@ on:
 permissions:
   contents: write
 
+env:
+  # Bump this to the latest 2dust/AndroidLibXrayLite release tag to ship a
+  # newer official Xray core. CI runs daily, so just updating this builds it.
+  LIBV2RAY_TAG: 'v26.9.9'
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -25,9 +30,6 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      with:
-        submodules: 'recursive'
-        fetch-depth: '0'
 
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
@@ -51,19 +53,11 @@ jobs:
       run: |
         cp -r ${{ github.workspace }}/libs ${{ github.workspace }}/V2rayNG/app
 
-    - name: Fetch AndroidLibXrayLite tag
-      run: |
-        pushd AndroidLibXrayLite
-        CURRENT_TAG=$(git describe --tags --abbrev=0)
-        echo "Current tag in this repo: $CURRENT_TAG"
-        echo "CURRENT_TAG=$CURRENT_TAG" >> $GITHUB_ENV
-        popd
-
     - name: Download libv2ray (official Xray core binding)
       uses: robinraju/release-downloader@v1.12
       with:
         repository: '2dust/AndroidLibXrayLite'
-        tag: ${{ env.CURRENT_TAG }}
+        tag: ${{ env.LIBV2RAY_TAG }}
         fileName: 'libv2ray.aar'
         out-file-path: V2rayNG/app/libs/
 
@@ -111,7 +105,7 @@ jobs:
         body: |
           Zero VPN release ${{ inputs.release_tag }}
 
-          - Xray core: ${{ env.CURRENT_TAG }} (official, embedded via libv2ray)
+          - Xray core: ${{ env.LIBV2RAY_TAG }} (official, embedded via libv2ray)
           - Auto core-update check on every app launch
           - Persian & English UI
 
