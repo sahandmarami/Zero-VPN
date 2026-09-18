@@ -22,6 +22,16 @@ import java.util.concurrent.TimeUnit
 object HttpUtil {
 
     /**
+     * Zero VPN: HTTP body together with the response headers collected along
+     * the redirect chain. Needed to expose the standard
+     * "subscription-userinfo" quota header to subscription updates.
+     */
+    data class HttpTextResult(
+        val content: String,
+        val headers: Map<String, String>,
+    )
+
+    /**
      * Converts the domain part of a URL string to its IDN (Punycode, ASCII Compatible Encoding) format.
      *
      * For example, a URL like "https://例子.中国/path" will be converted to "https://xn--fsqu00a.xn--fiqs8s/path".
@@ -144,9 +154,24 @@ object HttpUtil {
      */
     @Throws(IOException::class)
     fun getUrlContentWithUserAgent(request: UrlContentRequest): String {
+        return getUrlContentWithResponse(request).content
+    }
+
+    /**
+     * Retrieves the content of a URL as a string with a custom User-Agent
+     * header, plus the response headers of the final (and intermediate)
+     * responses. Redirect hops merge their headers; later values win.
+     *
+     * @param request The request parameters.
+     * @return The content and headers of the response.
+     * @throws IOException If an I/O error occurs.
+     */
+    @Throws(IOException::class)
+    fun getUrlContentWithResponse(request: UrlContentRequest): HttpTextResult {
         var currentUrl = request.url
         var redirects = 0
         val maxRedirects = 3
+        val collectedHeaders = mutableMapOf<String, String>()
 
         while (redirects++ < maxRedirects) {
             if (currentUrl == null) continue
@@ -193,7 +218,16 @@ object HttpUtil {
                     }
 
                     response.isSuccessful -> {
-                        return response.body?.string() ?: ""
+                        for (name in response.headers.names()) {
+                            val value = response.header(name)
+                            if (name != null && value != null) {
+                                collectedHeaders[name.lowercase()] = value
+                            }
+                        }
+                        return HttpTextResult(
+                            content = response.body?.string() ?: "",
+                            headers = collectedHeaders
+                        )
                     }
 
                     else -> {

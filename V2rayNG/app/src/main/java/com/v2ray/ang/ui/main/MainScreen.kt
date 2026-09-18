@@ -40,11 +40,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.v2ray.ang.R
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.handler.CoreUpdateManager
+import com.v2ray.ang.ui.compose.InputDialog
+import com.v2ray.ang.ui.compose.InputField
+import com.v2ray.ang.ui.compose.DeleteConfirmDialog
 import com.v2ray.ang.ui.compose.LocalDarkTheme
 import com.v2ray.ang.ui.compose.QRCodeDialog
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -61,6 +65,7 @@ fun MainScreen(
     zeroCoreUpdate: CoreUpdateManager.CoreUpdateResult? = null,
     onOpenZeroUpdate: () -> Unit = {},
     onDismissZeroUpdate: () -> Unit = {},
+    onEditSubscription: (String) -> Unit = {},
 ) {
     val uiState by mainViewModel.uiState.collectAsStateWithLifecycle()
     val groups = uiState.groups
@@ -83,6 +88,11 @@ fun MainScreen(
     var showRemoveConfirm by remember { mutableStateOf<String?>(null) }
 
     var shareTarget by remember { mutableStateOf<Triple<String, ProfileItem, Boolean>?>(null) }
+    // Zero VPN: add-subscription dialog + delete-subscription confirmation.
+    var showAddSubDialog by remember { mutableStateOf(false) }
+    var deleteSubTarget by remember { mutableStateOf<String?>(null) }
+    // Zero VPN: quota info of every subscription (used / total / expire).
+    val subscriptionInfo by mainViewModel.subscriptionInfo.collectAsStateWithLifecycle()
     val removeServer: (String) -> Unit = { guid ->
         if (confirmRemove) showRemoveConfirm = guid else onAction(MainAction.RemoveServer(guid))
     }
@@ -160,6 +170,46 @@ fun MainScreen(
     }
     if (shareQRCodeBitmap != null) {
         QRCodeDialog(bitmap = shareQRCodeBitmap, onDismiss = { onAction(MainAction.DismissQRCodeDialog) })
+    }
+
+    // Zero VPN: dialog to add a subscription by pasting its sub link.
+    if (showAddSubDialog) {
+        var subUrl by remember { mutableStateOf("") }
+        var subRemarks by remember { mutableStateOf("") }
+        InputDialog(
+            title = stringResource(R.string.zero_menu_add_subscription),
+            fields = listOf(
+                InputField(
+                    label = stringResource(R.string.zero_subscription_url_hint),
+                    value = subUrl,
+                ),
+                InputField(
+                    label = stringResource(R.string.zero_subscription_remarks_hint),
+                    value = subRemarks,
+                ),
+            ),
+            onFieldChange = { index, value ->
+                if (index == 0) subUrl = value else subRemarks = value
+            },
+            confirmText = stringResource(R.string.action_ok),
+            dismissText = stringResource(R.string.action_cancel),
+            onConfirm = {
+                showAddSubDialog = false
+                mainViewModel.addSubscription(url = subUrl, remarks = subRemarks)
+            },
+            onDismiss = { showAddSubDialog = false }
+        )
+    }
+    if (deleteSubTarget != null) {
+        val subId = deleteSubTarget!!
+        DeleteConfirmDialog(
+            message = stringResource(R.string.zero_subscription_delete_confirm),
+            onConfirm = {
+                deleteSubTarget = null
+                mainViewModel.deleteSubscription(subId)
+            },
+            onDismiss = { deleteSubTarget = null }
+        )
     }
 
     ModalNavigationDrawer(
@@ -254,7 +304,15 @@ fun MainScreen(
                             },
                             onSearchToggle = { show: Boolean -> showSearch = show },
                             onMenuClick = { scope.launch { drawerState.open() } },
-                            onAction = onAction,
+                            onAction = { action ->
+                                // Zero VPN: the add-subscription entry opens a
+                                // dialog here instead of routing to the Activity.
+                                if (action is MainAction.ImportSubscription) {
+                                    showAddSubDialog = true
+                                } else {
+                                    onAction(action)
+                                }
+                            },
                             onMoreMenuAction = { action ->
                                 when (action) {
                                     MainMoreMenuAction.RestartService -> onAction(MainAction.RestartService)
@@ -328,6 +386,7 @@ fun MainScreen(
                                 selectedServerName = selectedServerName,
                                 selectedServerDelay = selectedServerDelay,
                                 selectedServerGeo = selectedServerGeo,
+                                selectedServerQuota = mainViewModel.selectedServerQuota.collectAsStateWithLifecycle().value,
                                 onToggle = { onAction(MainAction.ToggleService) },
                                 onTestCurrent = { onAction(MainAction.TestCurrentServer) },
                                 onTestAll = { onAction(MainAction.TestRealAllServers) },
@@ -384,7 +443,11 @@ fun MainScreen(
                                             top = 0.dp,
                                             end = 0.dp,
                                             bottom = 16.dp
-                                        )
+                                        ),
+                                        subscriptionItem = subscriptionInfo[group.id],
+                                        onUpdateSubscription = { onAction(MainAction.UpdateSubscriptions) },
+                                        onEditSubscription = { onEditSubscription(group.id) },
+                                        onDeleteSubscription = { deleteSubTarget = group.id },
                                     )
                                 }
                             }

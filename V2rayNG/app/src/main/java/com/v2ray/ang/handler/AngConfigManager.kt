@@ -515,7 +515,7 @@ object AngConfigManager {
 
             var configText = try {
                 val httpPort = SettingsManager.getHttpPort()
-                HttpUtil.getUrlContentWithUserAgent(
+                HttpUtil.getUrlContentWithResponse(
                     UrlContentRequest(
                         url = url,
                         userAgent = userAgent,
@@ -528,11 +528,11 @@ object AngConfigManager {
                 )
             } catch (e: Exception) {
                 LogUtil.e(AppConfig.ANG_PACKAGE, "Update subscription: proxy not ready or other error", e)
-                ""
+                null
             }
-            if (configText.isEmpty()) {
+            if (configText?.content.isNullOrEmpty()) {
                 configText = try {
-                    HttpUtil.getUrlContentWithUserAgent(
+                    HttpUtil.getUrlContentWithResponse(
                         UrlContentRequest(
                             url = url,
                             userAgent = userAgent,
@@ -541,14 +541,19 @@ object AngConfigManager {
                     )
                 } catch (e: Exception) {
                     LogUtil.e(AppConfig.TAG, "Update subscription: Failed to get URL content with user agent", e)
-                    ""
+                    null
                 }
             }
-            if (configText.isEmpty()) {
+            if (configText == null || configText.content.isEmpty()) {
                 return SubscriptionUpdateResult(failureCount = 1)
             }
 
-            val count = parseConfigViaSub(configText, it.guid, false)
+            // Zero VPN: providers report the remaining quota through the
+            // standard "subscription-userinfo" response header. Store it on
+            // every successful fetch so the UI can show used/remaining volume.
+            applySubscriptionUserInfo(it.subscription, configText.headers)
+
+            val count = parseConfigViaSub(configText.content, it.guid, false)
             if (count > 0) {
                 it.subscription.lastUpdated = System.currentTimeMillis()
                 MmkvManager.encodeSubscription(it.guid, it.subscription)
@@ -558,12 +563,54 @@ object AngConfigManager {
                     successCount = 1
                 )
             } else {
-                // Got response but no valid configs parsed
+                // Got response but no valid configs parsed — still keep any
+                // quota info the provider sent before reporting the failure.
+                if (it.subscription.total > 0) {
+                    MmkvManager.encodeSubscription(it.guid, it.subscription)
+                }
                 return SubscriptionUpdateResult(failureCount = 1)
             }
         } catch (e: Exception) {
             LogUtil.e(AppConfig.TAG, "Failed to update config via subscription", e)
             return SubscriptionUpdateResult(failureCount = 1)
+        }
+    }
+
+    /**
+     * Zero VPN: parses the standard "subscription-userinfo" response header
+     * (upload=..; download=..; total=..; expire=..) and stores the values on
+     * the subscription item. Missing fields keep their previous value.
+     */
+    private fun applySubscriptionUserInfo(subscription: SubscriptionItem, headers: Map<String, String>) {
+        val header = headers.entries
+            .firstOrNull { it.key.equals(AppConfig.SUBSCRIPTION_USERINFO_HEADER, ignoreCase = true) }
+            ?.value
+            ?: return
+        try {
+            header.split(';')
+                .mapNotNull { part ->
+                    val idx = part.indexOf('=')
+                    if (idx <= 0) null else {
+                        part.substring(0, idx).trim().lowercase() to
+                                part.substring(idx + 1).trim().toLongOrNull()
+                    }
+                }
+                .forEach { (key, value) ->
+                    if (value != null) {
+                        when (key) {
+                            "upload" -> subscription.upload = value
+                            "download" -> subscription.download = value
+                            "total" -> subscription.total = value
+                            "expire" -> subscription.expire = value
+                        }
+                    }
+                }
+            LogUtil.i(
+                AppConfig.TAG,
+                "Subscription userinfo: used=${subscription.usedBytes}, total=${subscription.total}, expire=${subscription.expire}"
+            )
+        } catch (e: Exception) {
+            LogUtil.e(AppConfig.TAG, "Failed to parse subscription-userinfo header", e)
         }
     }
 

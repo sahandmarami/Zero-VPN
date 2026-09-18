@@ -601,4 +601,16 @@
     <string name="connection_test_empty_message">جزئیاتی در دسترس نیست</string>
     <string name="value_unknown">ناشناخته</string>
 
+    <!-- Zero VPN: subscriptions -->
+    <string name="zero_menu_add_subscription">افزودن اشتراک</string>
+    <string name="zero_subscription_url_hint">لینک اشتراک (https://...)</string>
+    <string name="zero_subscription_remarks_hint">نام (اختیاری)</string>
+    <string name="zero_subscription_added">اشتراک اضافه شد</string>
+    <string name="zero_subscription_traffic_used">%1$s از %2$s</string>
+    <string name="zero_subscription_traffic_remaining">%1$s باقی مانده</string>
+    <string name="zero_subscription_expire">انقضا: %1$s</string>
+    <string name="zero_subscription_expired">اشتراک منقضی شده</string>
+    <string name="zero_subscription_last_update">به‌روزرسانی: %1$s</string>
+    <string name="zero_subscription_delete_confirm">این اشتراک و همه سرورهای آن حذف شود؟</string>
+
 </resources>

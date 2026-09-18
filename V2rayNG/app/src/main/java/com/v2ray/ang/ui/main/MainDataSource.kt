@@ -27,6 +27,8 @@ interface MainDataSource : Closeable {
 
     fun getSubscriptions(): List<SubscriptionCache>
     fun getSubscriptionItem(id: String): SubscriptionItem?
+    fun encodeSubscription(id: String, item: SubscriptionItem)
+    fun removeSubscription(id: String)
 
     fun getServerGuidList(groupId: String): List<String>
     fun decodeServerConfig(guid: String): ProfileItem?

@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -50,6 +51,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.v2ray.ang.R
 import com.v2ray.ang.dto.LocateTarget
 import com.v2ray.ang.dto.entities.ProfileItem
+import com.v2ray.ang.dto.entities.SubscriptionItem
+import com.v2ray.ang.extension.toTrafficString
 import com.v2ray.ang.ui.compose.ItemDivider
 import com.v2ray.ang.ui.compose.ReorderableGridItem
 import com.v2ray.ang.ui.compose.ReorderableListItem
@@ -77,7 +80,11 @@ fun GroupPagerPage(
     onShareServer: (String, ProfileItem) -> Unit,
     onMoreServer: (String, ProfileItem) -> Unit,
     onRemoveServer: (String) -> Unit,
-    contentPadding: PaddingValues
+    contentPadding: PaddingValues,
+    subscriptionItem: SubscriptionItem? = null,
+    onUpdateSubscription: () -> Unit = {},
+    onEditSubscription: () -> Unit = {},
+    onDeleteSubscription: () -> Unit = {},
 ) {
     val groupStateFlow = remember(groupId) {
         mainViewModel.serverGroupState(groupId)
@@ -100,23 +107,158 @@ fun GroupPagerPage(
             remove = onRemoveServer,
         )
     }
-    ServerListPage(
-        rows = groupState.rows,
-        selectedGuid = selectedGuid,
-        locateTarget = locateTarget?.takeIf { it.groupId == groupId },
-        canReorder = canReorder,
-        doubleColumnDisplay = doubleColumnDisplay,
-        groupId = groupId,
-        lazyListStates = lazyListStates,
-        lazyGridStates = lazyGridStates,
-        actions = actions,
-        geoByHost = geoByHost,
-        onLocateHandled = { mainViewModel.onAction(MainAction.LocateHandled) },
-        onMoveServer = { fromIndex, toIndex ->
-            mainViewModel.moveServer(groupId, fromIndex, toIndex)
-        },
-        contentPadding = contentPadding
-    )
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (subscriptionItem != null && groupId.isNotEmpty()) {
+            ZeroSubscriptionHeader(
+                subscription = subscriptionItem,
+                onUpdate = onUpdateSubscription,
+                onEdit = onEditSubscription,
+                onDelete = onDeleteSubscription,
+            )
+        }
+        ServerListPage(
+            rows = groupState.rows,
+            selectedGuid = selectedGuid,
+            locateTarget = locateTarget?.takeIf { it.groupId == groupId },
+            canReorder = canReorder,
+            doubleColumnDisplay = doubleColumnDisplay,
+            groupId = groupId,
+            lazyListStates = lazyListStates,
+            lazyGridStates = lazyGridStates,
+            actions = actions,
+            geoByHost = geoByHost,
+            onLocateHandled = { mainViewModel.onAction(MainAction.LocateHandled) },
+            onMoveServer = { fromIndex, toIndex ->
+                mainViewModel.moveServer(groupId, fromIndex, toIndex)
+            },
+            contentPadding = contentPadding
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Zero VPN: subscription info card — traffic quota (used / remaining), expiry
+// date and quick actions for the group the user is browsing.
+// ---------------------------------------------------------------------------
+@Composable
+private fun ZeroSubscriptionHeader(
+    subscription: SubscriptionItem,
+    onUpdate: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val usedBytes = subscription.usedBytes
+    val totalBytes = subscription.total
+    val hasQuota = totalBytes > 0
+    val remaining = (totalBytes - usedBytes).coerceAtLeast(0L)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = subscription.remarks,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            IconButton(onClick = onUpdate, Modifier.size(34.dp)) {
+                Icon(
+                    painterResource(R.drawable.ic_refresh_24dp),
+                    stringResource(R.string.title_sub_update),
+                    Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+            IconButton(onClick = onEdit, Modifier.size(34.dp)) {
+                Icon(
+                    painterResource(R.drawable.ic_edit_24dp),
+                    stringResource(R.string.acc_edit),
+                    Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            IconButton(onClick = onDelete, Modifier.size(34.dp)) {
+                Icon(
+                    painterResource(R.drawable.ic_delete_24dp),
+                    stringResource(R.string.acc_delete),
+                    Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        if (hasQuota) {
+            Spacer(Modifier.height(4.dp))
+            LinearProgressIndicator(
+                progress = {
+                    (usedBytes.toFloat() / totalBytes).coerceIn(0f, 1f)
+                },
+                modifier = Modifier.fillMaxWidth(),
+                trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+            )
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(
+                        R.string.zero_subscription_traffic_used,
+                        usedBytes.toTrafficString(),
+                        totalBytes.toTrafficString()
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = stringResource(
+                        R.string.zero_subscription_traffic_remaining,
+                        remaining.toTrafficString()
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = if (remaining <= 0L) colorPingRed else MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        val expireText = if (subscription.expire > 0) {
+            val expired = subscription.expire * 1000L < System.currentTimeMillis()
+            if (expired) {
+                stringResource(R.string.zero_subscription_expired)
+            } else {
+                stringResource(
+                    R.string.zero_subscription_expire,
+                    java.text.SimpleDateFormat("yyyy/MM/dd", java.util.Locale.getDefault())
+                        .format(java.util.Date(subscription.expire * 1000L))
+                )
+            }
+        } else ""
+        val updatedText = if (subscription.lastUpdated > 0) {
+            stringResource(
+                R.string.zero_subscription_last_update,
+                java.text.SimpleDateFormat("yyyy/MM/dd HH:mm", java.util.Locale.getDefault())
+                    .format(java.util.Date(subscription.lastUpdated))
+            )
+        } else ""
+        if (expireText.isNotEmpty() || updatedText.isNotEmpty()) {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = listOf(expireText, updatedText).filter { it.isNotEmpty() }
+                    .joinToString("  ·  "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
 }
 
 private class ServerRowActions(

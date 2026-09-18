@@ -14,13 +14,16 @@ import com.v2ray.ang.dto.TestServiceMessage
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.dto.entities.ServersCache
 import com.v2ray.ang.dto.entities.SubscriptionCache
+import com.v2ray.ang.dto.entities.SubscriptionItem
 import com.v2ray.ang.extension.delay
 import com.v2ray.ang.extension.isComplexType
 import com.v2ray.ang.extension.matchesPattern
 import com.v2ray.ang.extension.moveItem
 import com.v2ray.ang.handler.GeoLookupManager
+import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.ui.base.BaseViewModel
 import com.v2ray.ang.util.LogUtil
+import com.v2ray.ang.util.Utils
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -97,6 +100,27 @@ class MainViewModel(
         .map { it.selectedGuid?.let { guid -> dataSource.decodeServerConfig(guid)?.remarks }.orEmpty() }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    // ---------- Zero VPN: subscription quota info (used / remaining volume) ----------
+    private val _subscriptionInfo =
+        MutableStateFlow<Map<String, SubscriptionItem>>(emptyMap())
+
+    /** Subscription items (incl. quota fields) keyed by subscription id. */
+    val subscriptionInfo: StateFlow<Map<String, SubscriptionItem>> =
+        _subscriptionInfo.asStateFlow()
+
+    /** (used, total) bytes of the selected server's subscription, null when unknown. */
+    val selectedServerQuota: StateFlow<Pair<Long, Long>?> = combine(
+        _uiState, _subscriptionInfo
+    ) { state, subs ->
+        state.selectedGuid?.let { guid ->
+            dataSource.decodeServerConfig(guid)?.subscriptionId
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { subId -> subs[subId] }
+                ?.takeIf { it.total > 0 }
+                ?.let { it.usedBytes to it.total }
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     // ---------- Zero VPN: per-server geo (country flag + IP) ----------
     private val _geoByHost = MutableStateFlow<Map<String, GeoLookupManager.ServerGeo>>(emptyMap())
@@ -374,13 +398,14 @@ class MainViewModel(
             MainAction.ImportQRcode,
             MainAction.ImportClipboard,
             MainAction.ImportConfigLocal,
+            MainAction.ImportSubscription,
             is MainAction.ImportManually,
             MainAction.RestartService,
             MainAction.LocateSelectedServer,
             is MainAction.EditServer,
             is MainAction.ShareClipboard,
             is MainAction.ShareFullContent -> {
-                // Handled by Activity via its onAction lambda
+                // Handled by Activity / MainScreen via its onAction lambda
             }
         }
     }
@@ -487,6 +512,77 @@ class MainViewModel(
 
     fun getSubscriptions(): List<SubscriptionCache> = dataSource.getSubscriptions()
 
+    /**
+     * Zero VPN: adds a subscription from a pasted sub link and fetches it
+     * immediately so the new group shows up with its servers and quota.
+     */
+    fun addSubscription(url: String, remarks: String) {
+        val trimmedUrl = url.trim()
+        if (trimmedUrl.isEmpty() || !Utils.isValidUrl(trimmedUrl)) {
+            toastError(R.string.toast_invalid_url)
+            return
+        }
+        if (!Utils.isValidSubUrl(trimmedUrl)) {
+            toastError(R.string.toast_insecure_url_protocol)
+            return
+        }
+        launchLoading {
+            withContext(ioDispatcher) {
+                try {
+                    val guid = Utils.getUuid()
+                    val item = SubscriptionItem(
+                        remarks = remarks.trim().ifEmpty {
+                            runCatching { java.net.URL(trimmedUrl).host }
+                                .getOrDefault("")
+                                .ifEmpty { trimmedUrl }
+                        },
+                        url = trimmedUrl,
+                    )
+                    dataSource.encodeSubscription(guid, item)
+                    toast(R.string.zero_subscription_added)
+                    val result = dataSource.updateConfigViaSub(SubscriptionCache(guid, item))
+                    dataSource.setSelectedSubscriptionId(guid)
+                    setupGroupTab(forceRefresh = true)
+                    if (result.successCount > 0) {
+                        toast(
+                            getQuantityString(
+                                R.plurals.title_update_config_count,
+                                result.configCount,
+                                result.configCount,
+                            )
+                        )
+                    } else {
+                        toastError(R.string.toast_failure)
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    LogUtil.e(AppConfig.TAG, "Failed to add subscription", e)
+                    toastError(R.string.toast_failure)
+                }
+            }
+        }
+    }
+
+    /** Zero VPN: removes a subscription together with its servers. */
+    fun deleteSubscription(groupId: String) {
+        if (groupId.isEmpty()) return
+        launchLoading {
+            withContext(ioDispatcher) {
+                try {
+                    SettingsManager.removeSubscriptionWithDefault(groupId)
+                    setupGroupTab(forceRefresh = true)
+                    refreshSelectedGuid()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    LogUtil.e(AppConfig.TAG, "Failed to delete subscription", e)
+                    toastError(R.string.toast_failure)
+                }
+            }
+        }
+    }
+
     private fun resolveSelectedGroup(groups: List<GroupMapItem>): String {
         val current = uiState.value.selectedGroupId
         val resolved = when {
@@ -522,9 +618,14 @@ class MainViewModel(
                 if (forceRefresh) {
                     cacheMutex.withLock { groupDataCache.clear() }
                 }
-                val groups = dataSource.getSubscriptions().map {
+                val subscriptions = dataSource.getSubscriptions()
+                val groups = subscriptions.map {
                     GroupMapItem(id = it.guid, remarks = it.subscription.remarks)
                 }
+                // Zero VPN: publish quota info (used/total/expire) for the UI.
+                _subscriptionInfo.value = subscriptions
+                    .filter { it.guid.isNotEmpty() }
+                    .associate { it.guid to it.subscription }
                 val selectedGroup = resolveSelectedGroup(groups)
                 val validIds = groups.mapTo(HashSet()) { it.id }
                 groupUiFlows.keys.removeAll { it !in validIds }

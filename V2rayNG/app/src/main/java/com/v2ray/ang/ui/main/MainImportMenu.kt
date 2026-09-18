@@ -11,6 +11,7 @@ import com.v2ray.ang.ui.compose.AppDropdownMenuItems
 import com.v2ray.ang.ui.compose.SelectListDialog
 
 private enum class ImportMenuAction(@StringRes val labelRes: Int, val action: MainAction) {
+    Subscription(R.string.zero_menu_add_subscription, MainAction.ImportSubscription),
     QRCode(R.string.menu_item_import_config_qrcode, MainAction.ImportQRcode),
     Clipboard(R.string.menu_item_import_config_clipboard, MainAction.ImportClipboard),
     LocalFile(R.string.menu_item_import_config_local, MainAction.ImportConfigLocal),

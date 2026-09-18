@@ -68,6 +68,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.v2ray.ang.R
+import com.v2ray.ang.extension.toTrafficString
 import com.v2ray.ang.handler.CoreUpdateManager
 import com.v2ray.ang.handler.GeoLookupManager
 import com.v2ray.ang.ui.compose.LocalDarkTheme
@@ -249,6 +250,7 @@ fun ZeroHomeScreen(
     selectedServerName: String,
     selectedServerDelay: Long,
     selectedServerGeo: GeoLookupManager.ServerGeo? = null,
+    selectedServerQuota: Pair<Long, Long>? = null,
     onToggle: () -> Unit,
     onTestCurrent: () -> Unit,
     onTestAll: () -> Unit,
@@ -450,6 +452,7 @@ fun ZeroHomeScreen(
             countryLabel = countryLine.takeIf { it.isNotBlank() },
             flagEmoji = flag,
             pingMillis = shownDelay?.takeIf { it >= 0 },
+            quota = selectedServerQuota,
             onClick = onOpenLocations,
             hc = hc,
             modifier = Modifier.padding(horizontal = 20.dp)
@@ -766,6 +769,7 @@ private fun ZeroServerCard(
     countryLabel: String?,
     flagEmoji: String?,
     pingMillis: Long?,
+    quota: Pair<Long, Long>? = null,
     onClick: () -> Unit,
     hc: ZeroHomeColors,
     modifier: Modifier = Modifier
@@ -810,6 +814,21 @@ private fun ZeroServerCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            // Zero VPN: subscription quota chip — used / total traffic.
+            if (quota != null && quota.second > 0) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = "⚡ " + stringResource(
+                        R.string.zero_subscription_traffic_used,
+                        quota.first.toTrafficString(),
+                        quota.second.toTrafficString()
+                    ),
+                    color = hc.textSecondary,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
         pingMillis?.let {
             Text(

@@ -601,4 +601,16 @@
     <string name="connection_test_empty_message">no details available</string>
     <string name="value_unknown">unknown</string>
 
+    <!-- Zero VPN: subscriptions -->
+    <string name="zero_menu_add_subscription">Add subscription</string>
+    <string name="zero_subscription_url_hint">Subscription link (https://...)</string>
+    <string name="zero_subscription_remarks_hint">Name (optional)</string>
+    <string name="zero_subscription_added">Subscription added</string>
+    <string name="zero_subscription_traffic_used">%1$s of %2$s</string>
+    <string name="zero_subscription_traffic_remaining">%1$s left</string>
+    <string name="zero_subscription_expire">Expires: %1$s</string>
+    <string name="zero_subscription_expired">Subscription expired</string>
+    <string name="zero_subscription_last_update">Updated: %1$s</string>
+    <string name="zero_subscription_delete_confirm">Delete this subscription and all of its servers?</string>
+
 </resources>

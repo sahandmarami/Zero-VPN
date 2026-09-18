@@ -53,6 +53,7 @@ import com.v2ray.ang.ui.server.ServerVlessActivity
 import com.v2ray.ang.ui.server.ServerVmessActivity
 import com.v2ray.ang.ui.server.ServerWireguardActivity
 import com.v2ray.ang.ui.settings.SettingsActivity
+import com.v2ray.ang.ui.subscription.SubEditActivity
 import com.v2ray.ang.ui.subscription.SubSettingActivity
 import com.v2ray.ang.ui.userasset.UserAssetActivity
 import com.v2ray.ang.util.HttpUtil
@@ -248,6 +249,11 @@ class MainActivity : HelperBaseComponentActivity() {
                 onDismissZeroUpdate = {
                     zeroAppUpdate.value = null
                     zeroCoreUpdate.value = null
+                },
+                onEditSubscription = { subId ->
+                    val editIntent = Intent(this@MainActivity, SubEditActivity::class.java)
+                    editIntent.putExtra("subId", subId)
+                    settingsActivityLauncher.launch(editIntent)
                 },
                 onAction = { action ->
                     when (action) {
