@@ -51,8 +51,8 @@ import com.v2ray.ang.R
 /** Bottom destinations: home / locations / settings — no account section. */
 enum class ZeroBottomTab { HOME, LOCATIONS, SETTINGS }
 
-private val NAV_BLOB_HEIGHT = 50.dp
-private val NAV_BAR_HEIGHT = 72.dp
+private val NAV_BLOB_HEIGHT = 60.dp
+private val NAV_BAR_HEIGHT = 78.dp
 
 // Neon blue gradient shared by the capsules and the liquid neck so the
 // silhouettes blend seamlessly (same colors over the same Y span).
@@ -136,10 +136,13 @@ fun ZeroBottomNav(
             NavBlob(offsetX = leadX, blobWidth = blobWidth)
 
             // --- Crisp content layer ------------------------------------------
+            // Bottom padding lifts the icons slightly above center — the labels
+            // no longer hug the bar's bottom edge (user feedback).
             Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 6.dp),
+                    .padding(horizontal = 6.dp)
+                    .padding(bottom = 7.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 ZeroNavItem(

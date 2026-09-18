@@ -6,7 +6,9 @@ import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.extension.idnHost
 import com.v2ray.ang.extension.nullIfBlank
 import com.v2ray.ang.extension.removeWhiteSpace
+import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.Utils
+import com.google.gson.JsonObject
 import java.net.URI
 
 object WireguardFmt : FmtBase() {
@@ -39,6 +41,7 @@ object WireguardFmt : FmtBase() {
 
     /**
      * Parses a Wireguard configuration file string into a ProfileItem object.
+     * Tolerates a UTF-8 BOM, leading whitespace and IPv6 bracketed endpoints.
      *
      * @param str the Wireguard configuration file string to parse
      * @return the parsed ProfileItem object, or null if parsing fails
@@ -51,7 +54,7 @@ object WireguardFmt : FmtBase() {
 
         var currentSection: String? = null
 
-        str.lines().forEach { line ->
+        str.replace("\uFEFF", "").lines().forEach { line ->
             val trimmedLine = line.trim()
 
             if (trimmedLine.isEmpty() || trimmedLine.startsWith("#")) {
@@ -84,7 +87,17 @@ object WireguardFmt : FmtBase() {
         config.publicKey = peerParams["publickey"].orEmpty()
         config.preSharedKey = peerParams["presharedkey"]?.nullIfBlank()
         val endpoint = peerParams["endpoint"].orEmpty()
-        val endpointParts = endpoint.split(":", limit = 2)
+        // Handles both "host:port" and bracketed IPv6 "[v6addr]:port".
+        val endpointParts = if (endpoint.startsWith("[")) {
+            val close = endpoint.indexOf(']')
+            if (close > 0 && endpoint.length > close + 1 && endpoint[close + 1] == ':') {
+                listOf(endpoint.substring(1, close), endpoint.substring(close + 2))
+            } else {
+                listOf(endpoint)
+            }
+        } else {
+            endpoint.split(":", limit = 2)
+        }
         if (endpointParts.size == 2) {
             config.server = endpointParts[0]
             config.serverPort = endpointParts[1]
@@ -95,6 +108,47 @@ object WireguardFmt : FmtBase() {
         config.reserved = peerParams["reserved"] ?: "0,0,0"
 
         return config
+    }
+
+    /**
+     * Extracts the embedded WireGuard .conf text from an AmneziaVPN backup
+     * JSON (the ".vpn" export / shared text):
+     * `{"containers":[{"awg"|"wg":{"last_config":"{ ... \"config\": \"[Interface]...\" }"}}]}`
+     *
+     * Liberal matching: scans every container entry for a `last_config` field
+     * whose decoded `config` looks like a WireGuard conf, so plain wg, awg and
+     * future container namings all work.
+     *
+     * @param text the pasted Amnezia backup JSON text
+     * @return the embedded [Interface]/[Peer] conf text, or null when absent
+     */
+    fun extractAmneziaWireguardConf(text: String): String? {
+        return try {
+            val root = JsonUtil.parseString(text) ?: return null
+            val containers = root.getAsJsonArray("containers") ?: return null
+            for (element in containers) {
+                val container = element as? JsonObject ?: continue
+                for ((_, value) in container.entrySet()) {
+                    val entry = value as? JsonObject ?: continue
+                    val lcAny = entry.get("last_config") ?: continue
+                    val lastConfig = when {
+                        lcAny.isJsonObject -> lcAny.asJsonObject
+                        lcAny.isJsonPrimitive -> JsonUtil.parseString(lcAny.asString)
+                        else -> null
+                    } ?: continue
+                    val conf = lastConfig.get("config")
+                        ?.takeIf { it.isJsonPrimitive }
+                        ?.asString
+                        ?.replace("\uFEFF", "")
+                    if (!conf.isNullOrBlank() && conf.contains("[Interface]", ignoreCase = true)) {
+                        return conf
+                    }
+                }
+            }
+            null
+        } catch (e: Exception) {
+            null
+        }
     }
 
 

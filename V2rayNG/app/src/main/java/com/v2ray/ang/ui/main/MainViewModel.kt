@@ -582,10 +582,15 @@ class MainViewModel(
                 try {
                     // Zero VPN: AmneziaWG obfuscation params (Jc/Jmin/Jmax/S1/S2/H1-H4)
                     // are not supported by the embedded Xray core — import as standard
-                    // WireGuard and tell the user.
-                    val hasAwgParams = configText.contains("[Interface]", ignoreCase = true) &&
-                            Regex("(?im)^\\s*(Jc|Jmin|Jmax|S1|S2|H1|H2|H3|H4)\\s*=")
-                                .containsMatchIn(configText)
+                    // WireGuard and tell the user. Detects both raw .conf pastes and
+                    // Amnezia backup JSON (.vpn) where params live as JSON fields.
+                    val junkConfRegex = Regex("(?im)^\\s*(Jc|Jmin|Jmax|S1|S2|H1|H2|H3|H4)\\s*=")
+                    val junkJsonRegex = Regex("\"(Jc|Jmin|Jmax|S1|S2|H1|H2|H3|H4)\"\\s*:")
+                    val isWgConf = configText.contains("[Interface]", ignoreCase = true)
+                    val isAmneziaJson = configText.contains("\"containers\"")
+                            || configText.contains("\"last_config\"")
+                    val hasAwgParams = (isWgConf && junkConfRegex.containsMatchIn(configText)) ||
+                            (isAmneziaJson && junkJsonRegex.containsMatchIn(configText))
                     val (count, countSub) = dataSource.importBatchConfig(
                         configText, uiState.value.selectedGroupId, true
                     )

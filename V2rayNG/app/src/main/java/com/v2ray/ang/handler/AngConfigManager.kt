@@ -369,7 +369,10 @@ object AngConfigManager {
                 LogUtil.e(AppConfig.TAG, "Failed to parse custom config server as single config", e)
             }
             return 0
-        } else if (server.startsWith("[Interface]") && server.contains("[Peer]")) {
+        } else if (server.replace("\uFEFF", "").trimStart().startsWith("[Interface]", ignoreCase = true)
+            && server.contains("[Peer]", ignoreCase = true)
+        ) {
+            // Plain WireGuard conf paste (Amnezia / official clients / files).
             try {
                 val config = WireguardFmt.parseWireguardConfFile(server)
                 config.subscriptionId = subid
@@ -384,6 +387,28 @@ object AngConfigManager {
                 throw e
             } catch (e: Exception) {
                 LogUtil.e(AppConfig.TAG, "Failed to parse WireGuard config file", e)
+            }
+            return 0
+        } else if (server.contains("\"containers\"") || server.contains("\"last_config\"")) {
+            // AmneziaVPN backup JSON (.vpn export pasted as text): pull the
+            // embedded WireGuard conf out of containers[].last_config.config.
+            try {
+                val conf = WireguardFmt.extractAmneziaWireguardConf(server)
+                if (conf != null) {
+                    val config = WireguardFmt.parseWireguardConfFile(conf)
+                    config.subscriptionId = subid
+                    config.description = generateDescription(config)
+                    commitProfiles(
+                        configs = listOf(ParsedProfile(config, conf)),
+                        subid = subid,
+                        append = append,
+                    )
+                    return 1
+                }
+            } catch (e: ProfileStorageException) {
+                throw e
+            } catch (e: Exception) {
+                LogUtil.e(AppConfig.TAG, "Failed to parse Amnezia backup JSON", e)
             }
             return 0
         } else {
