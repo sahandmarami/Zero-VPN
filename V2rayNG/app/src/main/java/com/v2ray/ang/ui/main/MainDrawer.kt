@@ -4,6 +4,7 @@ import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -77,24 +78,33 @@ fun MainDrawerContent(drawerState: DrawerState, onNavigate: (MainDestination) ->
                     .fillMaxWidth()
                     .height(180.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    // Zero VPN: neon brand logo straight from the launcher icon.
+                // Zero VPN: the "base" neon artwork lives here as the brand header.
+                Box(modifier = Modifier.fillMaxSize()) {
                     Image(
-                        painter = painterResource(R.drawable.zero_logo),
+                        painter = painterResource(R.drawable.base_background),
                         contentDescription = null,
-                        modifier = Modifier.size(110.dp)
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.matchParentSize()
                     )
-                    Text(
-                        text = stringResource(R.string.app_name),
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        // Zero VPN: neon brand logo straight from the launcher icon.
+                        Image(
+                            painter = painterResource(R.drawable.zero_logo),
+                            contentDescription = null,
+                            modifier = Modifier.size(96.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.app_name),
+                            style = MaterialTheme.typography.titleLarge,
+                            color = Color.White
+                        )
+                    }
                 }
             }
             drawerItems.forEachIndexed { index, item ->

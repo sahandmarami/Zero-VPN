@@ -1,6 +1,6 @@
 package com.v2ray.ang.ui.main
 
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,9 +28,9 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.v2ray.ang.R
@@ -164,24 +164,34 @@ fun MainScreen(
             )
         }
     ) {
-        // Zero VPN: the neon "base" artwork is the in-app appearance.
+        // Zero VPN: clean reference-style backdrop — deep charcoal-navy with a
+        // soft neon-blue glow behind the status area (light/dark rhythm).
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
+                .background(if (isDarkTheme) Color(0xFF070B11) else Color(0xFFF2F6FB))
         ) {
-            Image(
-                painter = painterResource(R.drawable.base_background),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.matchParentSize()
-            )
-            if (!isDarkTheme) {
-                // Light mode keeps a readable scrim over the artwork.
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .background(Color.White.copy(alpha = 0.88f))
+            Canvas(modifier = Modifier.matchParentSize()) {
+                val glowColor = if (isDarkTheme) Color(0xFF0A5E96) else Color(0xFF35C6FF)
+                drawRect(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            glowColor.copy(alpha = if (isDarkTheme) 0.32f else 0.18f),
+                            Color.Transparent
+                        ),
+                        center = Offset(size.width / 2f, size.height * 0.13f),
+                        radius = size.width * 0.95f
+                    )
+                )
+                drawRect(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            glowColor.copy(alpha = if (isDarkTheme) 0.10f else 0.08f),
+                            Color.Transparent
+                        ),
+                        center = Offset(size.width / 2f, size.height * 0.72f),
+                        radius = size.width * 0.9f
+                    )
                 )
             }
 

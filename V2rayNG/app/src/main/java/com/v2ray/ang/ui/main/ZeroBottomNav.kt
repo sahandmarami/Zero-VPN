@@ -1,20 +1,25 @@
 package com.v2ray.ang.ui.main
 
-import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -25,21 +30,31 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.v2ray.ang.R
-import com.v2ray.ang.ui.compose.colorNeonCyan
+import com.v2ray.ang.ui.compose.LocalDarkTheme
+import com.v2ray.ang.ui.compose.rememberGooeyEffect
 
 /** Bottom destinations: home / locations / settings — no account section. */
 enum class ZeroBottomTab { HOME, LOCATIONS, SETTINGS }
 
+private val NAV_BLOB_HEIGHT = 50.dp
+private val NAV_BAR_HEIGHT = 72.dp
+
 /**
- * Zero VPN bottom navigation modeled on the reference design:
- * the active item sits in a neon pill, inactive items are quiet icons.
+ * Zero VPN bottom navigation modeled on the reference shot:
+ * the active item sits on a solid neon blob that slides between tabs as a
+ * liquid — two gooey blobs (blur 6 / contrast 18) stretch and melt into each
+ * other while the icons stay crisp on a layer above.
  */
 @Composable
 fun ZeroBottomNav(
@@ -49,75 +64,150 @@ fun ZeroBottomNav(
     isDarkTheme: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val barBackground = if (isDarkTheme) Color(0xD90A1424) else Color(0xF2FFFFFF)
+    val barBackground = if (isDarkTheme) Color(0xE60B1018) else Color(0xF2FFFFFF)
+    val inactiveColor = if (isDarkTheme) Color(0xFF7C8CA6) else Color(0xFF5A6B85)
+    val activeIndex = when (selectedTab) {
+        ZeroBottomTab.HOME -> 0
+        ZeroBottomTab.LOCATIONS -> 1
+        ZeroBottomTab.SETTINGS -> 0
+    }
+    val gooEffect = rememberGooeyEffect(blurDp = 6f, contrast = 18f)
 
     Box(
         modifier = modifier
             .fillMaxWidth()
             .background(barBackground)
+            .windowInsetsPadding(WindowInsets.navigationBars)
     ) {
-        Row(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.navigationBars)
-                .height(66.dp)
-                .padding(horizontal = 18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .height(NAV_BAR_HEIGHT)
         ) {
-            ZeroNavItem(
-                iconRes = R.drawable.ic_zero_home_24dp,
-                label = stringResource(R.string.zero_tab_home),
-                selected = selectedTab == ZeroBottomTab.HOME,
-                isDarkTheme = isDarkTheme,
-                onClick = { onSelectTab(ZeroBottomTab.HOME) }
+            val itemWidth: Dp = maxWidth / 3
+            val blobWidth = itemWidth - 30.dp
+            val blobTargetX = itemWidth * activeIndex + (itemWidth - blobWidth) / 2
+
+            // Lead blob — bouncy spring (550 ms cubic-bezier(0.34,1.56,0.64,1)).
+            val leadX by animateDpAsState(
+                targetValue = blobTargetX,
+                animationSpec = spring(
+                    dampingRatio = 0.55f,
+                    stiffness = Spring.StiffnessMediumLow
+                ),
+                label = "leadBlobX"
             )
-            ZeroNavItem(
-                iconRes = R.drawable.ic_zero_locations_24dp,
-                label = stringResource(R.string.zero_tab_locations),
-                selected = selectedTab == ZeroBottomTab.LOCATIONS,
-                isDarkTheme = isDarkTheme,
-                onClick = { onSelectTab(ZeroBottomTab.LOCATIONS) }
+            // Trail blob — softer spring, lags behind so the two merge and
+            // stretch while travelling (liquid melt between tabs).
+            val trailX by animateDpAsState(
+                targetValue = blobTargetX,
+                animationSpec = spring(
+                    dampingRatio = 0.75f,
+                    stiffness = Spring.StiffnessLow
+                ),
+                label = "trailBlobX"
             )
-            ZeroNavItem(
-                iconRes = R.drawable.ic_settings_24dp,
-                label = stringResource(R.string.zero_tab_settings),
-                selected = false, // opens the settings screen; no tab state
-                isDarkTheme = isDarkTheme,
-                onClick = onOpenSettings
-            )
+
+            // --- Gooey blob layer (blurred + alpha-thresholded) --------------
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        compositingStrategy = CompositingStrategy.Offscreen
+                        renderEffect = gooEffect
+                    }
+            ) {
+                NavBlob(
+                    offsetX = trailX,
+                    blobWidth = blobWidth,
+                    alpha = 0.85f
+                )
+                NavBlob(
+                    offsetX = leadX,
+                    blobWidth = blobWidth,
+                    alpha = 1f
+                )
+            }
+
+            // --- Crisp content layer ------------------------------------------
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ZeroNavItem(
+                    iconRes = R.drawable.ic_zero_home_24dp,
+                    label = stringResource(R.string.zero_tab_home),
+                    selected = selectedTab == ZeroBottomTab.HOME,
+                    inactiveColor = inactiveColor,
+                    onClick = { onSelectTab(ZeroBottomTab.HOME) },
+                    modifier = Modifier.weight(1f)
+                )
+                ZeroNavItem(
+                    iconRes = R.drawable.ic_zero_locations_24dp,
+                    label = stringResource(R.string.zero_tab_locations),
+                    selected = selectedTab == ZeroBottomTab.LOCATIONS,
+                    inactiveColor = inactiveColor,
+                    onClick = { onSelectTab(ZeroBottomTab.LOCATIONS) },
+                    modifier = Modifier.weight(1f)
+                )
+                ZeroNavItem(
+                    iconRes = R.drawable.ic_settings_24dp,
+                    label = stringResource(R.string.zero_tab_settings),
+                    selected = false, // opens the settings screen; no tab state
+                    inactiveColor = inactiveColor,
+                    onClick = onOpenSettings,
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
     }
 }
+
+/** One gooey liquid blob — neon-blue gradient (پررنگ → کم‌رنگی). */
+@Composable
+private fun NavBlob(offsetX: Dp, blobWidth: Dp, alpha: Float) {
+    Box(
+        modifier = Modifier
+            .offset(x = offsetX, y = (NAV_BAR_HEIGHT - NAV_BLOB_HEIGHT) / 2)
+            .width(blobWidth)
+            .height(NAV_BLOB_HEIGHT)
+            .alphaIf(alpha)
+            .background(
+                brush = Brush.verticalGradient(
+                    listOf(Color(0xFF35C6FF), Color(0xFF0084D4))
+                ),
+                shape = RoundedCornerShape(25.dp)
+            )
+    )
+}
+
+private fun Modifier.alphaIf(alpha: Float): Modifier =
+    if (alpha >= 1f) this else this.then(Modifier.graphicsLayer { this.alpha = alpha })
 
 @Composable
 private fun ZeroNavItem(
     iconRes: Int,
     label: String,
     selected: Boolean,
-    isDarkTheme: Boolean,
-    onClick: () -> Unit
+    inactiveColor: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val interaction = remember { MutableInteractionSource() }
-    val pillColor by animateColorAsState(
-        targetValue = if (selected) colorNeonCyan.copy(alpha = 0.16f) else Color.Transparent,
-        animationSpec = spring(stiffness = 500f),
-        label = "pillColor"
-    )
-    val contentColor = if (selected) colorNeonCyan
-    else if (isDarkTheme) Color(0xFF7C8CA6) else Color(0xFF5A6B85)
+    val contentColor = if (selected) Color.White else inactiveColor
 
     Column(
-        modifier = Modifier
-            .background(pillColor, RoundedCornerShape(18.dp))
+        modifier = modifier
             .clickable(
                 interactionSource = interaction,
                 indication = null,
                 onClick = onClick
             )
-            .padding(horizontal = 16.dp, vertical = 6.dp),
+            .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp)
+        verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
         Icon(
             painter = painterResource(iconRes),

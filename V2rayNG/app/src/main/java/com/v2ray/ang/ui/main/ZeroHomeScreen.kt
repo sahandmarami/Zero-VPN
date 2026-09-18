@@ -1,11 +1,10 @@
 package com.v2ray.ang.ui.main
 
-import android.graphics.RenderEffect
-import android.graphics.Shader
 import android.os.Build
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -27,6 +26,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -43,19 +43,19 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -67,25 +67,25 @@ import androidx.compose.ui.unit.sp
 import com.v2ray.ang.R
 import com.v2ray.ang.handler.CoreUpdateManager
 import com.v2ray.ang.ui.compose.LocalDarkTheme
-import com.v2ray.ang.ui.compose.colorNeonBlue
-import com.v2ray.ang.ui.compose.colorNeonCyan
-import com.v2ray.ang.ui.compose.colorNeonGlow
+import com.v2ray.ang.ui.compose.rememberGooeyEffect
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.math.abs
-import kotlin.math.cos
 import kotlin.math.sin
 
 // ---------------------------------------------------------------------------
-// Palette derived from the real Zero VPN icon (neon ring #00A8F5 on navy).
+// Blue palette replacing the reference's green — same shapes, same
+// light/dark rhythm (کم‌رنگی و پررنگی) sampled from the Zero VPN icon.
 // ---------------------------------------------------------------------------
-val colorZeroNeon = Color(0xFF00A8F5)      // icon ring neon blue
-val colorZeroNeonSoft = Color(0xFF35C6FF)  // lighter glow
+val colorZeroNeon = Color(0xFF00A8F5)      // پررنگ — icon ring saturated blue
+val colorZeroNeonSoft = Color(0xFF35C6FF)  // کم‌رنگ — light glow blue
 val colorZeroConnected = Color(0xFF00A8F5)
-val colorZeroIdle = Color(0xFF55637C)      // idle ring gray-blue
-val colorZeroTesting = Color(0xFFFBBF24)   // amber while testing
+val colorZeroIdle = Color(0xFF3A4A61)      // idle dim blue-gray
+val colorZeroTesting = Color(0xFFFFB020)   // amber while testing
 val colorZeroFailure = Color(0xFFFF5470)   // neon red
-val colorZeroPingGood = Color(0xFF35E08C)  // good ping green
+val colorZeroPingGood = Color(0xFF35C6FF)  // good ping — light blue
+val colorZeroPingMid = Color(0xFFFFB020)   // slow ping — amber (reference orange)
+val colorZeroPingBad = Color(0xFFFF5470)   // very slow — red
 
 /** Converts an ISO-3166 alpha-2 code to its regional-indicator flag emoji. */
 internal fun countryCodeToFlagEmoji(code: String?): String? {
@@ -137,8 +137,7 @@ object ZeroStatsTracker {
 }
 
 // ---------------------------------------------------------------------------
-// Theme-aware home colors: the neon-blue identity stays, text/panels adapt
-// so the home screen stays readable in light mode too.
+// Theme-aware home colors — flat dark surfaces like the reference shot.
 // ---------------------------------------------------------------------------
 private data class ZeroHomeColors(
     val textPrimary: Color,
@@ -146,7 +145,6 @@ private data class ZeroHomeColors(
     val cardBg: Color,
     val cardBorder: Color,
     val pillBg: Color,
-    val boltBg: Color,
 )
 
 @Composable
@@ -154,18 +152,16 @@ private fun zeroHomeColors(): ZeroHomeColors {
     val dark = LocalDarkTheme.current
     return if (dark) ZeroHomeColors(
         textPrimary = Color.White,
-        textSecondary = Color(0xFF8296B4),
-        cardBg = Color(0x7312233E),
-        cardBorder = Color(0x3D35C6FF),
-        pillBg = Color(0x6612233E),
-        boltBg = Color(0xFF12233E),
+        textSecondary = Color(0xFF7C8CA6),
+        cardBg = Color(0xFF141A24),   // solid charcoal like the reference cards
+        cardBorder = Color(0xFF212C3C),
+        pillBg = Color(0xFF12171F),   // solid dark pill
     ) else ZeroHomeColors(
         textPrimary = Color(0xFF12192A),
         textSecondary = Color(0xFF5A6B85),
-        cardBg = Color(0xF2FFFFFF),
-        cardBorder = Color(0x330077E0),
-        pillBg = Color(0xE6FFFFFF),
-        boltBg = Color(0xFFFFFFFF),
+        cardBg = Color(0xFFFFFFFF),
+        cardBorder = Color(0xFFE2E9F4),
+        pillBg = Color(0xFFF1F4F9),
     )
 }
 
@@ -219,9 +215,9 @@ fun ZeroHomeTopBar(
 }
 
 // ---------------------------------------------------------------------------
-// Home screen — layout modeled on the requested reference:
-// status word, big gooey power ring, bolt test, big ping, stat pills,
-// current-server card. Neon-blue like the icon. No account section.
+// Home screen — exact reference layout, blue instead of green:
+// status word, gooey power ring with melting bolt droplet, big ping,
+// comparison caption, stat pills, current-server card. No account section.
 // ---------------------------------------------------------------------------
 @Composable
 fun ZeroHomeScreen(
@@ -272,7 +268,7 @@ fun ZeroHomeScreen(
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(6.dp))
 
         // --- Status word -------------------------------------------------
         val statusLabel = when {
@@ -282,37 +278,31 @@ fun ZeroHomeScreen(
         }
         val statusColor = when {
             isTesting -> colorZeroTesting
-            connected -> colorZeroConnected
-            else -> colorZeroIdle
+            connected -> colorZeroNeonSoft
+            else -> hc.textSecondary
         }
         Text(
             text = statusLabel,
             color = statusColor,
-            fontSize = 15.sp,
+            fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 5.sp,
             textAlign = TextAlign.Center
         )
 
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(18.dp))
 
-        // --- Big gooey power button --------------------------------------
+        // --- Gooey power group (ring + melting bolt droplet) --------------
         GooeyPowerButton(
             isRunning = isRunning,
             isTesting = isTesting,
-            onClick = onToggle
+            onClick = onToggle,
+            onTest = {
+                if (connected) onTestCurrent() else onTestAll()
+            }
         )
 
-        Spacer(Modifier.height(10.dp))
-
-        // --- Bolt: real ping test ----------------------------------------
-        BoltTestButton(
-            isTesting = isTesting,
-            connected = connected,
-            onClick = { if (connected) onTestCurrent() else onTestAll() }
-        )
-
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(14.dp))
 
         // --- Big ping ------------------------------------------------------
         val testDelay = (status as? MainStatus.ConnectionTest)?.result?.delayMillis
@@ -409,36 +399,42 @@ fun ZeroHomeScreen(
 }
 
 // ---------------------------------------------------------------------------
-// Gooey power button — native liquid-gooey metaball remake (blur + threshold),
-// spring overshoot cubic-bezier(0.34, 1.56, 0.64, 1) ~550 ms.
+// Gooey power group — native liquid-gooey remake (blur 6 / contrast 18):
+// a thin neon ring whose bottom melts into a hanging droplet carrying the
+// bolt (real-ping test). Connecting pulls the droplet up into the ring
+// (Liquid.Item melt with the bouncy spring); idle it dangles below.
 // ---------------------------------------------------------------------------
+private const val RING_RADIUS_DP = 74
+private const val DROP_RADIUS_DP = 17
+
 @Composable
 fun GooeyPowerButton(
     isRunning: Boolean,
     isTesting: Boolean,
     onClick: () -> Unit,
+    onTest: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    val interactionDrop = remember { MutableInteractionSource() }
+    val dropPressed by interactionDrop.collectIsPressedAsState()
 
     // Liquid squish on press.
     val pressScale by animateFloatAsState(
-        targetValue = if (pressed) 0.88f else 1f,
+        targetValue = if (pressed || dropPressed) 0.965f else 1f,
         animationSpec = spring(dampingRatio = 0.35f, stiffness = Spring.StiffnessMediumLow),
         label = "pressScale"
     )
 
-    // Burst: satellites merge inside when idle, fling out when running.
-    var burstTarget by remember { mutableStateOf(0f) }
-    LaunchedEffect(isRunning) { burstTarget = if (isRunning) 1f else 0f }
-    val burst by animateFloatAsState(
-        targetValue = burstTarget,
-        animationSpec = spring(dampingRatio = 0.42f, stiffness = Spring.StiffnessMediumLow),
-        label = "burst"
+    // Melt: droplet hangs below when idle, melts into the ring when connected.
+    val dropGap by animateDpAsState(
+        targetValue = if (isRunning) (-6).dp else 6.dp,
+        animationSpec = spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMediumLow),
+        label = "dropGap"
     )
 
-    // Gentle liquid pulse while connected.
+    // Gentle liquid pulse (testing breathe + connected shimmer).
     val pulse = rememberInfiniteTransition(label = "pulse")
     val pulseT by pulse.animateFloat(
         initialValue = 0f,
@@ -449,7 +445,6 @@ fun GooeyPowerButton(
         ),
         label = "pulseT"
     )
-    // Slow rotation for the testing arc.
     val spin by pulse.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
@@ -460,116 +455,100 @@ fun GooeyPowerButton(
         label = "spin"
     )
 
-    val blobColor = if (isRunning) colorZeroNeon else Color(0xFF16233B)
-    val satelliteColor = colorZeroNeonSoft
     val ringColor = when {
         isTesting -> colorZeroTesting
         isRunning -> colorZeroNeon
         else -> colorZeroIdle
     }
-
-    val gooeyEffect = remember {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            try {
-                val blur = RenderEffect.createBlurEffect(16f, 16f, Shader.TileMode.CLAMP)
-                val cm = android.graphics.ColorMatrix(
-                    floatArrayOf(
-                        1f, 0f, 0f, 0f, 0f,
-                        0f, 1f, 0f, 0f, 0f,
-                        0f, 0f, 1f, 0f, 0f,
-                        0f, 0f, 0f, 30f, -640f
-                    )
-                )
-                RenderEffect.createColorFilterEffect(
-                    android.graphics.ColorMatrixColorFilter(cm), blur
-                ).asComposeRenderEffect()
-            } catch (_: Exception) {
-                null
-            }
-        } else null
+    val dropColor = if (isTesting) colorZeroTesting else ringColor
+    val boltTint = if (isRunning || isTesting) Color(0xFF05121F) else Color(0xFF0B1119)
+    val powerTint = when {
+        isTesting -> colorZeroTesting
+        isRunning -> colorZeroNeonSoft
+        else -> Color(0xFF8B99B0)
     }
 
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        // Glowing outer ring (crisp layer, outside the goo blur).
-        Canvas(modifier = Modifier.size(196.dp)) {
-            val c = center
-            val stroke = 3.5.dp.toPx()
-            // soft glow
+    val gooEffect = rememberGooeyEffect(blurDp = 6f, contrast = 18f)
+
+    Box(
+        modifier = modifier
+            .width(240.dp)
+            .height(212.dp)
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0.35f)
+            },
+        contentAlignment = Alignment.TopCenter
+    ) {
+        // --- Crisp glow layer (outside the goo threshold) ------------------
+        Canvas(modifier = Modifier.matchParentSize()) {
+            val c = Offset(size.width / 2f, RING_RADIUS_DP.dp.toPx())
+            val r = RING_RADIUS_DP.dp.toPx()
+            // soft ambient glow
             drawCircle(
-                color = ringColor.copy(alpha = 0.22f),
-                radius = 82.dp.toPx(),
+                color = ringColor.copy(alpha = if (isRunning || isTesting) 0.20f else 0.12f),
+                radius = r,
                 center = c,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 9.dp.toPx())
+                style = Stroke(width = 10.dp.toPx())
             )
+            // connected shimmer ring
+            if (isRunning && !isTesting) {
+                drawCircle(
+                    color = colorZeroNeonSoft.copy(alpha = 0.28f + 0.14f * sin(pulseT)),
+                    radius = r + 5.dp.toPx() + 2.5f.dp.toPx() * sin(pulseT),
+                    center = c,
+                    style = Stroke(width = 1.4.dp.toPx())
+                )
+            }
             // testing sweep arc
             if (isTesting) {
                 drawArc(
-                    color = ringColor,
+                    color = colorZeroTesting,
                     startAngle = spin,
                     sweepAngle = 92f,
                     useCenter = false,
-                    topLeft = androidx.compose.ui.geometry.Offset(
-                        c.x - 82.dp.toPx(), c.y - 82.dp.toPx()
-                    ),
-                    size = androidx.compose.ui.geometry.Size(
-                        82.dp.toPx() * 2, 82.dp.toPx() * 2
-                    ),
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(
-                        width = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round
-                    )
-                )
-            } else {
-                drawCircle(
-                    color = ringColor.copy(alpha = if (isRunning) 0.9f else 0.75f),
-                    radius = 82.dp.toPx(),
-                    center = c,
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke)
+                    topLeft = Offset(c.x - r, c.y - r),
+                    size = Size(r * 2, r * 2),
+                    style = Stroke(width = 3.5.dp.toPx(), cap = StrokeCap.Round)
                 )
             }
         }
 
-        // Gooey blob layer.
+        // --- Goo layer: ring + droplet melt together ------------------------
         Canvas(
             modifier = Modifier
-                .size(196.dp)
+                .matchParentSize()
                 .graphicsLayer {
                     compositingStrategy = CompositingStrategy.Offscreen
-                    renderEffect = gooeyEffect
+                    renderEffect = gooEffect
                 }
         ) {
-            val c = center
-            val baseRadius = 56.dp.toPx() * pressScale
-            val pulseR = if (isRunning) 2.2.dp.toPx() * sin(pulseT) else 0f
-
-            drawCircle(color = blobColor, radius = baseRadius + pulseR, center = c)
-
-            if (burst > 0.01f) {
-                val travel = 62.dp.toPx() * burst
-                val sRadius = 15.dp.toPx()
-                for (angleDeg in listOf(200f, 340f)) {
-                    val angle = Math.toRadians(
-                        (angleDeg + 8f * sin(pulseT + angleDeg)).toDouble()
-                    )
-                    drawCircle(
-                        color = if (isRunning) satelliteColor else blobColor,
-                        radius = sRadius * (1f - 0.3f * burst),
-                        center = androidx.compose.ui.geometry.Offset(
-                            c.x + travel * cos(angle).toFloat(),
-                            c.y + travel * sin(angle).toFloat()
-                        )
-                    )
-                }
-            }
+            val cx = size.width / 2f
+            val ringR = RING_RADIUS_DP.dp.toPx()
+            val ringC = Offset(cx, ringR)
+            // thin neon ring
+            drawCircle(
+                color = ringColor,
+                radius = ringR,
+                center = ringC,
+                style = Stroke(width = 3.5.dp.toPx())
+            )
+            // hanging droplet (breathe while testing)
+            val dropScale = if (isTesting) 1f + 0.10f * sin(pulseT * 2f) else 1f
+            val dropR = DROP_RADIUS_DP.dp.toPx() * dropScale
+            val dropC = Offset(
+                cx,
+                ringR * 2f + dropGap.toPx() + dropR
+            )
+            drawCircle(color = dropColor, radius = dropR, center = dropC)
         }
 
-        // Power icon (clickable).
+        // --- Power icon (clickable) -----------------------------------------
         Box(
             modifier = Modifier
+                .offset(y = (RING_RADIUS_DP - 56).dp)
                 .size(112.dp)
-                .graphicsLayer {
-                    scaleX = pressScale
-                    scaleY = pressScale
-                }
                 .clip(CircleShape)
                 .clickable(
                     interactionSource = interaction,
@@ -584,49 +563,40 @@ fun GooeyPowerButton(
                 contentDescription = stringResource(
                     if (isRunning) R.string.zero_disconnect else R.string.zero_connect
                 ),
-                tint = if (isRunning) Color(0xFF041224) else Color(0xFFB9C9E2),
-                modifier = Modifier.size(58.dp)
+                tint = powerTint,
+                modifier = Modifier.size(46.dp)
+            )
+        }
+
+        // --- Bolt inside the droplet (real-ping test, clickable) ------------
+        val dropCenterY = (RING_RADIUS_DP * 2).dp + dropGap + DROP_RADIUS_DP.dp
+        Box(
+            modifier = Modifier
+                .offset(y = dropCenterY - 22.dp)
+                .size(44.dp)
+                .clip(CircleShape)
+                .clickable(
+                    interactionSource = interactionDrop,
+                    indication = null,
+                    role = Role.Button,
+                    onClick = onTest
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_flash_on_24dp),
+                contentDescription = stringResource(
+                    if (isRunning) R.string.zero_test_ping else R.string.zero_test_all
+                ),
+                tint = boltTint,
+                modifier = Modifier.size(18.dp)
             )
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Bolt test button.
-// ---------------------------------------------------------------------------
-@Composable
-private fun BoltTestButton(
-    isTesting: Boolean,
-    connected: Boolean,
-    onClick: () -> Unit
-) {
-    val hc = zeroHomeColors()
-    Box(
-        modifier = Modifier
-            .size(46.dp)
-            .shadow(8.dp, CircleShape, spotColor = colorZeroNeon.copy(alpha = 0.5f))
-            .background(
-                if (isTesting) Color(0xFF3A2E05) else hc.boltBg,
-                CircleShape
-            )
-            .border(1.dp, colorZeroNeon.copy(alpha = 0.45f), CircleShape)
-            .clip(CircleShape)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            painter = painterResource(R.drawable.ic_flash_on_24dp),
-            contentDescription = stringResource(
-                if (connected) R.string.zero_test_ping else R.string.zero_test_all
-            ),
-            tint = if (isTesting) colorZeroTesting else colorZeroNeonSoft,
-            modifier = Modifier.size(22.dp)
-        )
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Stat pill (value + label).
+// Stat pill (value + label) — flat dark surface like the reference.
 // ---------------------------------------------------------------------------
 @Composable
 private fun ZeroStatPill(
@@ -638,7 +608,7 @@ private fun ZeroStatPill(
     Column(
         modifier = modifier
             .background(hc.pillBg, RoundedCornerShape(14.dp))
-            .border(1.dp, hc.cardBorder, RoundedCornerShape(14.dp))
+            .border(1.dp, hc.cardBorder.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
             .padding(vertical = 12.dp, horizontal = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(3.dp)
@@ -664,7 +634,7 @@ private fun ZeroStatPill(
 }
 
 // ---------------------------------------------------------------------------
-// Current server card.
+// Current server card — flat dark row: flag, name, country, colored ping.
 // ---------------------------------------------------------------------------
 @Composable
 private fun ZeroServerCard(
@@ -679,7 +649,6 @@ private fun ZeroServerCard(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(10.dp, RoundedCornerShape(18.dp), spotColor = Color(0x6600A8F5))
             .background(hc.cardBg, RoundedCornerShape(18.dp))
             .border(1.dp, hc.cardBorder, RoundedCornerShape(18.dp))
             .clip(RoundedCornerShape(18.dp))
@@ -713,8 +682,11 @@ private fun ZeroServerCard(
         pingMillis?.let {
             Text(
                 text = stringResource(R.string.server_test_delay_value, it),
-                color = if (it < 500) colorZeroPingGood
-                else if (it < 1500) Color(0xFFFBBF24) else colorZeroFailure,
+                color = when {
+                    it <= 120 -> colorZeroPingGood
+                    it <= 400 -> colorZeroPingMid
+                    else -> colorZeroPingBad
+                },
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold
             )
@@ -775,11 +747,8 @@ private fun ZeroBannerRow(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
-            .background(
-                Color(0xFF12233E),
-                RoundedCornerShape(14.dp)
-            )
-            .border(1.dp, Color(0x3D35C6FF), RoundedCornerShape(14.dp))
+            .background(Color(0xFF141A24), RoundedCornerShape(14.dp))
+            .border(1.dp, Color(0xFF212C3C), RoundedCornerShape(14.dp))
             .padding(start = 14.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -795,7 +764,7 @@ private fun ZeroBannerRow(
             Icon(
                 painter = painterResource(R.drawable.ic_zero_close_24dp),
                 contentDescription = stringResource(R.string.zero_dismiss),
-                tint = Color(0xFF8296B4),
+                tint = Color(0xFF7C8CA6),
                 modifier = Modifier.size(16.dp)
             )
         }
