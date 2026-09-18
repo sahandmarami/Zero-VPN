@@ -12,6 +12,7 @@ import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.enums.NetworkType
 import com.v2ray.ang.extension.nullIfBlank
+import com.v2ray.ang.fmt.WireguardFmt
 import com.v2ray.ang.util.JsonUtil
 
 class ServerUiState(
@@ -142,6 +143,23 @@ class ServerUiState(
             reserved = if (isWireguard) reserved else null,
             localAddress = if (isWireguard) localAddress else null,
             mtu = if (isWireguard) mtu.toIntOrNull() else null,
+            // Zero VPN: keep the stored WG/AWG configuration text in sync with
+            // the edited fields (DNS, obfuscation params and AllowedIPs are
+            // carried over from the previous text).
+            rawConf = if (isWireguard) {
+                WireguardFmt.rebuildRawConf(
+                    previous = initialConfig.rawConf,
+                    secretKey = secretKey,
+                    publicKey = publicKey,
+                    preSharedKey = preSharedKey,
+                    localAddress = localAddress,
+                    mtu = mtu.toIntOrNull(),
+                    server = address,
+                    serverPort = port
+                )
+            } else {
+                null
+            },
             obfsPassword = if (isHysteria2) obfsPassword else null,
             portHopping = if (isHysteria2) portHopping else null,
             portHoppingInterval = if (isHysteria2) portHoppingInterval else null,

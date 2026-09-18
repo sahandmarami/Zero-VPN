@@ -136,13 +136,15 @@ fun ZeroBottomNav(
             NavBlob(offsetX = leadX, blobWidth = blobWidth)
 
             // --- Crisp content layer ------------------------------------------
-            // Bottom padding lifts the icons slightly above center — the labels
-            // no longer hug the bar's bottom edge (user feedback).
+            // The content row occupies the exact vertical span of the capsules
+            // (same offset, same height), so icons + labels sit geometrically
+            // centered inside the blue goo (user feedback).
             Row(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 6.dp)
-                    .padding(bottom = 7.dp),
+                    .offset(y = (NAV_BAR_HEIGHT - NAV_BLOB_HEIGHT) / 2)
+                    .height(NAV_BLOB_HEIGHT)
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 ZeroNavItem(
@@ -330,10 +332,9 @@ private fun ZeroNavItem(
                 interactionSource = interaction,
                 indication = null,
                 onClick = onClick
-            )
-            .padding(vertical = 4.dp),
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp)
+        verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically)
     ) {
         Icon(
             painter = painterResource(iconRes),

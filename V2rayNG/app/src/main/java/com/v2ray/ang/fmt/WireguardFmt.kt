@@ -40,21 +40,39 @@ object WireguardFmt : FmtBase() {
     }
 
     /**
+     * Detects AmneziaWG obfuscation parameters (Jc/Jmin/Jmax, S1-S4, H1-H4,
+     * I1-I5) inside a WireGuard configuration text.
+     */
+    private val awgParamRegex = Regex("(?im)^\\s*(Jc|Jmin|Jmax|S1|S2|S3|S4|H1|H2|H3|H4|I1|I2|I3|I4|I5)\\s*=")
+
+    fun hasAwgParams(item: ProfileItem): Boolean {
+        if (item.configType != EConfigType.WIREGUARD) return false
+        val conf = item.rawConf ?: return false
+        return awgParamRegex.containsMatchIn(conf)
+    }
+
+    /**
      * Parses a Wireguard configuration file string into a ProfileItem object.
      * Tolerates a UTF-8 BOM, leading whitespace and IPv6 bracketed endpoints.
      *
+     * The full configuration text is preserved in [ProfileItem.rawConf] so the
+     * AmneziaWG engine (DNS, AllowedIPs, obfuscation parameters, keepalive)
+     * can run it verbatim.
+     *
      * @param str the Wireguard configuration file string to parse
-     * @return the parsed ProfileItem object, or null if parsing fails
+     * @return the parsed ProfileItem object
      */
     fun parseWireguardConfFile(str: String): ProfileItem {
         val config = ProfileItem.create(EConfigType.WIREGUARD)
+        val normalized = str.replace("\uFEFF", "").trim()
+        config.rawConf = normalized
 
         val interfaceParams: MutableMap<String, String> = mutableMapOf()
         val peerParams: MutableMap<String, String> = mutableMapOf()
 
         var currentSection: String? = null
 
-        str.replace("\uFEFF", "").lines().forEach { line ->
+        normalized.lines().forEach { line ->
             val trimmedLine = line.trim()
 
             if (trimmedLine.isEmpty() || trimmedLine.startsWith("#")) {
@@ -108,6 +126,132 @@ object WireguardFmt : FmtBase() {
         config.reserved = peerParams["reserved"] ?: "0,0,0"
 
         return config
+    }
+
+    /**
+     * Extracts the TUN-level settings needed to run a WireGuard/AmneziaWG
+     * configuration through the embedded AmneziaWG engine: interface
+     * addresses, DNS servers, AllowedIPs (routes) and MTU.
+     *
+     * @param conf the raw [Interface]/[Peer] configuration text
+     * @return the extracted settings, or null when the text has no [Interface]
+     */
+    fun extractTunnelSettings(conf: String): WgTunnelSettings? {
+        var current: MutableMap<String, String>? = null
+        val iface = mutableMapOf<String, String>()
+        val peer = mutableMapOf<String, String>()
+
+        conf.replace("\uFEFF", "").lines().forEach { line ->
+            val trimmed = line.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) return@forEach
+            when {
+                trimmed.startsWith("[Interface]", ignoreCase = true) -> current = iface
+                trimmed.startsWith("[Peer]", ignoreCase = true) -> current = peer
+                else -> {
+                    val parts = trimmed.split("=", limit = 2)
+                    if (parts.size == 2 && current != null) {
+                        current!![parts[0].trim().lowercase()] = parts[1].trim()
+                    }
+                }
+            }
+        }
+
+        if (iface.isEmpty()) return null
+
+        val addresses = iface["address"]
+            ?.split(",")
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            .orEmpty()
+        val dnsServers = iface["dns"]
+            ?.split(",")
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            .orEmpty()
+        val allowedIps = peer["allowedips"]
+            ?.split(",")
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            .orEmpty()
+        val mtu = iface["mtu"]?.toIntOrNull()
+
+        return WgTunnelSettings(addresses, dnsServers, allowedIps, mtu)
+    }
+
+    /**
+     * Rebuilds the stored configuration text after the user edited a profile
+     * in the WireGuard editor: edited fields (keys, address, MTU, endpoint)
+     * override the stored values while DNS, obfuscation parameters,
+     * AllowedIPs and keepalive are carried over from the previous text.
+     *
+     * Returns null when there is no previous configuration (plain WireGuard
+     * profiles run through the Xray core and need no stored text).
+     */
+    fun rebuildRawConf(
+        previous: String?,
+        secretKey: String?,
+        publicKey: String?,
+        preSharedKey: String?,
+        localAddress: String?,
+        mtu: Int?,
+        server: String?,
+        serverPort: String?
+    ): String? {
+        if (previous.isNullOrBlank()) return null
+
+        var current: MutableMap<String, String>? = null
+        val iface = mutableMapOf<String, String>()
+        val peer = mutableMapOf<String, String>()
+        previous.replace("\uFEFF", "").lines().forEach { line ->
+            val trimmed = line.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) return@forEach
+            when {
+                trimmed.startsWith("[Interface]", ignoreCase = true) -> current = iface
+                trimmed.startsWith("[Peer]", ignoreCase = true) -> current = peer
+                else -> {
+                    val parts = trimmed.split("=", limit = 2)
+                    if (parts.size == 2 && current != null) {
+                        current!![parts[0].trim().lowercase()] = parts[1].trim()
+                    }
+                }
+            }
+        }
+
+        val sb = StringBuilder()
+        sb.appendLine("[Interface]")
+        // Edited values win; fall back to the stored ones.
+        val privateKey = secretKey?.trim().takeUnless { it.isNullOrEmpty() } ?: iface["privatekey"]
+        if (!privateKey.isNullOrEmpty()) sb.appendLine("PrivateKey = $privateKey")
+        val address = localAddress?.trim().takeUnless { it.isNullOrEmpty() } ?: iface["address"]
+        if (!address.isNullOrEmpty()) sb.appendLine("Address = $address")
+        iface["dns"]?.let { if (it.isNotBlank()) sb.appendLine("DNS = $it") }
+        val mtuValue = mtu ?: iface["mtu"]?.toIntOrNull()
+        if (mtuValue != null && mtuValue > 0) sb.appendLine("MTU = $mtuValue")
+        // Preserve every AmneziaWG obfuscation parameter line verbatim.
+        previous.replace("\uFEFF", "").lines().forEach { line ->
+            if (awgParamRegex.containsMatchIn(line)) {
+                sb.appendLine(line.trim())
+            }
+        }
+
+        sb.appendLine()
+        sb.appendLine("[Peer]")
+        val pubKey = publicKey?.trim().takeUnless { it.isNullOrEmpty() } ?: peer["publickey"]
+        if (!pubKey.isNullOrEmpty()) sb.appendLine("PublicKey = $pubKey")
+        val psk = preSharedKey?.trim().takeUnless { it.isNullOrEmpty() } ?: peer["presharedkey"]
+        if (!psk.isNullOrEmpty()) sb.appendLine("PresharedKey = $psk")
+        val allowed = peer["allowedips"]
+        if (!allowed.isNullOrEmpty()) sb.appendLine("AllowedIPs = $allowed")
+        val endpoint = if (!server.isNullOrEmpty()) {
+            Utils.getIpv6Address(server) + ":" + serverPort.orEmpty()
+        } else {
+            peer["endpoint"]
+        }
+        if (!endpoint.isNullOrEmpty()) sb.appendLine("Endpoint = $endpoint")
+        val keepalive = peer["persistentkeepalive"]
+        if (!keepalive.isNullOrEmpty()) sb.appendLine("PersistentKeepalive = $keepalive")
+
+        return sb.toString().trim() + "\n"
     }
 
     /**
@@ -176,3 +320,19 @@ object WireguardFmt : FmtBase() {
         return toUri(config, config.secretKey, dicQuery)
     }
 }
+
+/**
+ * TUN-level settings extracted from a WireGuard/AmneziaWG configuration text,
+ * used to configure [android.net.VpnService.Builder] for profiles that run
+ * through the embedded AmneziaWG engine.
+ */
+data class WgTunnelSettings(
+    /** Interface addresses in CIDR form, e.g. "172.16.0.2/32". */
+    val addresses: List<String>,
+    /** DNS servers from the [Interface] section. */
+    val dnsServers: List<String>,
+    /** AllowedIPs of the first peer, used as VPN routes. */
+    val allowedIps: List<String>,
+    /** MTU from the [Interface] section, null when absent. */
+    val mtu: Int?
+)

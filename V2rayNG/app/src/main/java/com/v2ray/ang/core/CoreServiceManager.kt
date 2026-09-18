@@ -18,6 +18,7 @@ import com.v2ray.ang.dto.ConnectionTestResult
 import com.v2ray.ang.dto.OutboundTrafficStat
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.enums.BrowserDialerMode
+import com.v2ray.ang.fmt.WireguardFmt
 import com.v2ray.ang.extension.delay
 import com.v2ray.ang.extension.isNotNullEmpty
 import com.v2ray.ang.handler.MmkvManager
@@ -72,10 +73,17 @@ object CoreServiceManager {
         }
 
     /**
+     * Zero VPN: protect callback for the AmneziaWG engine's UDP sockets.
+     * Null when no VPN service is attached.
+     */
+    val socketProtector: ((Int) -> Boolean)?
+        get() = serviceControl?.get()?.let { control -> { fd -> control.vpnProtect(fd) } }
+
+    /**
      * Checks if the V2Ray service is running.
      * @return True if the service is running, false otherwise.
      */
-    fun isRunning() = coreController.isRunning
+    fun isRunning(): Boolean = AwgManager.isActive() || coreController.isRunning
 
     /**
      * Gets the name of the currently running server.
@@ -131,6 +139,14 @@ object CoreServiceManager {
         val config = MmkvManager.decodeServerConfig(guid) ?: error("Failed to decode server config")
 
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Starting core loop for ${config.remarks}")
+
+        // Zero VPN: AmneziaWG profiles run through the embedded AmneziaWG
+        // engine instead of the Xray core (no obfuscation support there).
+        if (WireguardFmt.hasAwgParams(config)) {
+            launchAwgEngine(service, vpnInterface, config, isReload)
+            return
+        }
+
         val result = CoreConfigManager.getV2rayConfig(service, guid)
         LogUtil.d(AppConfig.TAG, result.content)
         if (!result.status) {
@@ -185,6 +201,32 @@ object CoreServiceManager {
     }
 
     /**
+     * Zero VPN: starts the AmneziaWG engine on the VPN interface for profiles
+     * carrying Amnezia obfuscation parameters, with the same lifecycle around
+     * it (notification, messages to UI, network monitor) as the Xray path.
+     */
+    @Throws(Exception::class)
+    private fun launchAwgEngine(
+        service: Service,
+        vpnInterface: ParcelFileDescriptor?,
+        config: ProfileItem,
+        isReload: Boolean
+    ) {
+        val pfd = vpnInterface ?: error("VPN interface is required for AmneziaWG profiles")
+
+        currentConfig = config
+        NotificationManager.showNotification(currentConfig)
+
+        AwgManager.start(service, pfd, config)
+
+        if (!isReload) {
+            MessageHelper.sendMsg2UI(service, AppConfig.MSG_STATE_START_SUCCESS, "")
+        }
+        NotificationManager.startSpeedNotification()
+        LogUtil.i(AppConfig.TAG, "StartCore-Manager: AWG engine started successfully")
+    }
+
+    /**
      * Stops the V2Ray core service.
      * Unregisters broadcast receivers, stops notifications, and shuts down plugins.
      * @return True if the core was stopped successfully, false otherwise.
@@ -197,7 +239,10 @@ object CoreServiceManager {
         networkMonitor = null
         currentVpnInterface = null
 
-        if (isRunning()) {
+        // Zero VPN: stop the AmneziaWG engine first when it owns the tunnel.
+        AwgManager.stop()
+
+        if (coreController.isRunning) {
             CoroutineScope(Dispatchers.IO).launch {
                 try {
                     coreController.stopLoop()
@@ -285,7 +330,8 @@ object CoreServiceManager {
      */
     fun queryAllOutboundTrafficStats(): List<OutboundTrafficStat> {
         // The stats manager is gone once the core stops, querying it then reaches into freed state.
-        if (!isRunning()) return emptyList()
+        // The AmneziaWG engine has no Xray stats manager either.
+        if (!isRunning() || AwgManager.isActive()) return emptyList()
 
         val payload = coreController.queryAllOutboundTrafficStats()
 
@@ -318,6 +364,12 @@ object CoreServiceManager {
      */
     private fun measureV2rayDelay(requestId: String) {
         val service = getService() ?: return
+        if (AwgManager.isActive()) {
+            // The delay test goes through the Xray core; AmneziaWG profiles
+            // have no core to test through. Report as not measured.
+            MessageHelper.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_CANCEL, "", requestId)
+            return
+        }
         if (!isRunning() || isReloading) {
             MessageHelper.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_CANCEL, "", requestId)
             return

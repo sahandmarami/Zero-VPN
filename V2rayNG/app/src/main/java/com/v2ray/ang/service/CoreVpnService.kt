@@ -16,6 +16,7 @@ import com.v2ray.ang.AppConfig.LOOPBACK
 import com.v2ray.ang.BuildConfig
 import com.v2ray.ang.contracts.ServiceControl
 import com.v2ray.ang.contracts.Tun2SocksControl
+import com.v2ray.ang.core.AwgManager
 import com.v2ray.ang.core.CoreServiceManager
 import com.v2ray.ang.handler.AppLocaleManager
 import com.v2ray.ang.handler.MmkvManager
@@ -149,7 +150,11 @@ class CoreVpnService : VpnService(), ServiceControl {
             return false
         }
 
-        runTun2socks()
+        // Zero VPN: AmneziaWG profiles do not use tun2socks - the embedded
+        // engine consumes the TUN descriptor directly.
+        if (!AwgManager.isAwgProfileSelected()) {
+            runTun2socks()
+        }
         return true
     }
 
@@ -197,8 +202,18 @@ class CoreVpnService : VpnService(), ServiceControl {
      * @param builder The VPN Builder to configure
      */
     private fun configureNetworkSettings(builder: Builder) {
-        val vpnConfig = SettingsManager.getCurrentVpnInterfaceAddressConfig()
         val bypassLan = SettingsManager.routingRulesetsBypassLan()
+
+        // Zero VPN: AmneziaWG profiles derive the interface from the pasted
+        // configuration (addresses, DNS, AllowedIPs, MTU) instead of the
+        // generic private VLAN.
+        val awgSettings = AwgManager.currentTunnelSettings()
+        if (awgSettings != null) {
+            configureAwgNetworkSettings(builder, awgSettings)
+            return
+        }
+
+        val vpnConfig = SettingsManager.getCurrentVpnInterfaceAddressConfig()
 
         // Configure IPv4 settings
         builder.setMtu(SettingsManager.getVpnMtu())
@@ -236,6 +251,53 @@ class CoreVpnService : VpnService(), ServiceControl {
         }
 
         //builder.setSession(V2RayServiceManager.getRunningServerName())
+    }
+
+    /**
+     * Zero VPN: configures the VPN interface from an AmneziaWG configuration
+     * (interface addresses, DNS servers, AllowedIPs routes, MTU).
+     *
+     * @param builder The VPN Builder to configure
+     * @param settings The settings parsed from the AWG configuration text
+     */
+    private fun configureAwgNetworkSettings(builder: Builder, settings: com.v2ray.ang.fmt.WgTunnelSettings) {
+        builder.setMtu(settings.mtu ?: 1280)
+
+        var addedAddress = false
+        settings.addresses.forEach { cidr ->
+            val parts = cidr.split('/')
+            val addr = parts[0].trim()
+            val isIpv6 = addr.contains(':')
+            val prefix = parts.getOrNull(1)?.trim()?.toIntOrNull() ?: if (isIpv6) 128 else 32
+            try {
+                builder.addAddress(addr, prefix)
+                addedAddress = true
+            } catch (e: Exception) {
+                LogUtil.w(AppConfig.TAG, "StartCore-VPN: Bad AWG address $cidr", e)
+            }
+        }
+        if (!addedAddress) {
+            builder.addAddress("172.16.0.2", 32)
+        }
+
+        val routes = settings.allowedIps.ifEmpty { listOf("0.0.0.0/0", "::/0") }
+        routes.forEach { cidr ->
+            val parts = cidr.split('/')
+            val addr = parts[0].trim()
+            val prefix = parts.getOrNull(1)?.trim()?.toIntOrNull() ?: if (addr.contains(':')) 128 else 32
+            try {
+                builder.addRoute(addr, prefix)
+            } catch (e: Exception) {
+                LogUtil.w(AppConfig.TAG, "StartCore-VPN: Bad AWG route $cidr", e)
+            }
+        }
+
+        val dnsList = settings.dnsServers.ifEmpty { listOf("1.1.1.1", "8.8.8.8") }
+        dnsList.forEach {
+            if (Utils.isPureIpAddress(it)) {
+                builder.addDnsServer(it)
+            }
+        }
     }
 
     /**

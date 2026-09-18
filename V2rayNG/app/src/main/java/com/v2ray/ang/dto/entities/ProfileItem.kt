@@ -73,6 +73,14 @@ data class ProfileItem(
     var proxyChainProfiles: String? = null,
 
     var browserDialerMode: String? = null,
+
+    /**
+     * Zero VPN: original WireGuard/AmneziaWG configuration text ([Interface]/[Peer]).
+     * Only present for profiles imported from a .conf paste or Amnezia backup.
+     * Preserves DNS, AllowedIPs, keepalive and Amnezia obfuscation parameters
+     * (Jc/Jmin/Jmax/S1-S4/H1-H4) which have no dedicated fields.
+     */
+    var rawConf: String? = null,
 ) {
 
     companion object {

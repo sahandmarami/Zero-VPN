@@ -44,7 +44,7 @@
     <string name="zero_set_per_app_hint">انتخاب برنامه‌هایی که از VPN عبور می‌کنند</string>
     <string name="zero_set_routing_hint">قوانین مسیریابی و دامنه‌ها</string>
     <!-- Zero VPN WireGuard -->
-    <string name="zero_awg_notice">پارامترهای AmneziaWG شناسایی شد — این نسخه وایرگارد استاندارد را اجرا می‌کند</string>
+    <string name="zero_awg_notice">پروفایل AmneziaWG ایمپورت شد — موتور اختصاصی امنیزیا فعال می‌شود ✓</string>
     <string name="app_widget_name">تعویض</string>
     <string name="app_tile_name">تعویض</string>
     <string name="app_tile_first_use">برای اولین استفاده از این قابلیت، لطفاً ابتدا از داخل برنامه یک سرور اضافه کنید</string>

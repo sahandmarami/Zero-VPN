@@ -44,7 +44,7 @@
     <string name="zero_set_per_app_hint">Choose which apps go through the VPN</string>
     <string name="zero_set_routing_hint">Routing rules and domains</string>
     <!-- Zero VPN WireGuard -->
-    <string name="zero_awg_notice">AmneziaWG parameters detected — this build runs standard WireGuard</string>
+    <string name="zero_awg_notice">AmneziaWG profile imported — the dedicated Amnezia engine will run it ✓</string>
     <string name="app_widget_name">Switch</string>
     <string name="app_tile_name">Switch</string>
     <string name="app_tile_first_use">Add a profile in the app before using this feature.</string>
