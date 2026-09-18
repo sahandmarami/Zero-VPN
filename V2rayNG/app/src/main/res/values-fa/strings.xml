@@ -23,6 +23,28 @@
     <string name="zero_tab_settings">تنظیمات</string>
     <string name="zero_no_server">هیچ سروری انتخاب نشده</string>
     <string name="zero_open_locations">برای انتخاب سرور بزنید</string>
+    <!-- Zero VPN launch loading screen -->
+    <string name="zero_splash_checking">بررسی به‌روزرسانی از منبع اصلی…</string>
+    <string name="zero_splash_downloading">در حال دانلود به‌روزرسانی…</string>
+    <string name="zero_splash_ready">در حال باز شدن زیرو وی‌پی‌ان…</string>
+    <string name="zero_splash_version">نسخه %1$s</string>
+    <string name="zero_splash_core_ok">هسته Xray نسخه %1$s — به‌روز است</string>
+    <string name="zero_splash_core_old">هسته Xray نسخه %1$s — هسته جدیدتر موجود است</string>
+    <string name="zero_install_update">نصب به‌روزرسانی</string>
+    <!-- Zero VPN settings tab -->
+    <string name="zero_set_personalize">شخصی‌سازی</string>
+    <string name="zero_set_connection">اتصال</string>
+    <string name="zero_set_update">به‌روزرسانی</string>
+    <string name="zero_set_more">بیشتر</string>
+    <string name="zero_auto_update">به‌روزرسانی خودکار هنگام باز شدن</string>
+    <string name="zero_auto_update_summary">هر بار برنامه باز شود از منبع اصلی بررسی و نسخه جدید دانلود می‌شود</string>
+    <string name="zero_core_version">هسته Xray</string>
+    <string name="zero_core_version_value">نسخه %1$s (با آپدیت برنامه به‌روز می‌شود)</string>
+    <string name="zero_core_version_unknown">درون برنامه</string>
+    <string name="zero_set_per_app_hint">انتخاب برنامه‌هایی که از VPN عبور می‌کنند</string>
+    <string name="zero_set_routing_hint">قوانین مسیریابی و دامنه‌ها</string>
+    <!-- Zero VPN WireGuard -->
+    <string name="zero_awg_notice">پارامترهای AmneziaWG شناسایی شد — این نسخه وایرگارد استاندارد را اجرا می‌کند</string>
     <string name="app_widget_name">تعویض</string>
     <string name="app_tile_name">تعویض</string>
     <string name="app_tile_first_use">برای اولین استفاده از این قابلیت، لطفاً ابتدا از داخل برنامه یک سرور اضافه کنید</string>

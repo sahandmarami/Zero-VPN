@@ -1,6 +1,7 @@
 package com.v2ray.ang.ui.main
 
 import android.content.Intent
+import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
@@ -8,9 +9,13 @@ import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import com.v2ray.ang.AngApplication
 import com.v2ray.ang.AppConfig
@@ -50,12 +55,21 @@ import com.v2ray.ang.ui.server.ServerWireguardActivity
 import com.v2ray.ang.ui.settings.SettingsActivity
 import com.v2ray.ang.ui.subscription.SubSettingActivity
 import com.v2ray.ang.ui.userasset.UserAssetActivity
+import com.v2ray.ang.util.HttpUtil
+import com.v2ray.ang.dto.UrlContentRequest
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.Utils
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import kotlin.math.max
+
+private const val SPLASH_MIN_MILLIS = 1800L
+private const val SPLASH_FADE_MILLIS = 120L
 
 class MainActivity : HelperBaseComponentActivity() {
 
@@ -66,6 +80,10 @@ class MainActivity : HelperBaseComponentActivity() {
     // Zero VPN: automatic update state (checked on every app launch).
     private val zeroAppUpdate = MutableStateFlow<Pair<String, String>?>(null)
     private val zeroCoreUpdate = MutableStateFlow<CoreUpdateManager.CoreUpdateResult?>(null)
+
+    // Zero VPN: launch loading screen (checks/downloads updates before opening).
+    private val zeroSplash = MutableStateFlow(ZeroSplashState())
+    private var zeroUpdateApkFile: File? = null
 
     private val requestVpnPermission =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -105,25 +123,104 @@ class MainActivity : HelperBaseComponentActivity() {
 
         checkAndRequestPermission(PermissionType.POST_NOTIFICATIONS) {}
 
-        // Zero VPN: check for updates on every launch — app build (which ships
-        // the newest official Xray core) and the core release itself.
+        // Zero VPN: launch loading screen — on every open it checks the
+        // official sources (Zero VPN release + official Xray-core release);
+        // if a newer build exists it is downloaded in-place (it carries the
+        // newest official core) and can be installed, then the app opens.
         lifecycleScope.launch {
-            try {
-                val appUpdate = UpdateCheckerManager.checkForUpdate(false)
-                if (appUpdate.hasUpdate && !appUpdate.latestVersion.isNullOrBlank()) {
-                    zeroAppUpdate.value = Pair(appUpdate.latestVersion, appUpdate.downloadUrl.orEmpty())
+            val startedAt = System.currentTimeMillis()
+            val autoUpdate = MmkvManager.decodeSettingsBool(AppConfig.PREF_AUTO_UPDATE, true)
+
+            val appUpdateDeferred = lifecycleScope.async {
+                try {
+                    UpdateCheckerManager.checkForUpdate(false)
+                } catch (e: Exception) {
+                    LogUtil.d(AppConfig.TAG, "App update check skipped: ${e.message}")
+                    null
                 }
-            } catch (e: Exception) {
-                LogUtil.d(AppConfig.TAG, "App update check skipped: ${e.message}")
             }
-            try {
-                val coreUpdate = CoreUpdateManager.checkCoreUpdate()
-                if (coreUpdate.hasUpdate) {
-                    zeroCoreUpdate.value = coreUpdate
+            val coreUpdateDeferred = lifecycleScope.async {
+                try {
+                    CoreUpdateManager.checkCoreUpdate()
+                } catch (e: Exception) {
+                    LogUtil.d(AppConfig.TAG, "Core update check skipped: ${e.message}")
+                    null
                 }
-            } catch (e: Exception) {
-                LogUtil.d(AppConfig.TAG, "Core update check skipped: ${e.message}")
             }
+
+            val appUpdate = appUpdateDeferred.await()
+            val coreUpdate = coreUpdateDeferred.await()
+
+            if (appUpdate?.hasUpdate == true && !appUpdate.latestVersion.isNullOrBlank()) {
+                zeroAppUpdate.value = Pair(appUpdate.latestVersion, appUpdate.downloadUrl.orEmpty())
+            }
+            if (coreUpdate != null) {
+                zeroCoreUpdate.value = coreUpdate
+                zeroSplash.value = zeroSplash.value.copy(
+                    coreVersion = coreUpdate.currentVersion ?: coreUpdate.latestVersion,
+                    coreUpToDate = coreUpdate.currentVersion?.let { !coreUpdate.hasUpdate }
+                )
+            }
+
+            // In-place download of the newest build (carries the newest core).
+            if (autoUpdate && appUpdate?.hasUpdate == true && !appUpdate.downloadUrl.isNullOrBlank()) {
+                zeroSplash.value = zeroSplash.value.copy(
+                    phase = ZeroSplashPhase.Downloading,
+                    downloadProgress = 0
+                )
+                try {
+                    val target = File(cacheDir, "zero_update_${appUpdate.latestVersion}.apk")
+                    val ok = HttpUtil.downloadToFile(
+                        UrlContentRequest(url = appUpdate.downloadUrl, timeout = 30_000),
+                        target
+                    ) { percent, _, _ ->
+                        zeroSplash.value = zeroSplash.value.copy(downloadProgress = percent)
+                    }
+                    if (ok && target.length() > 0L) {
+                        zeroUpdateApkFile = target
+                        zeroSplash.value = zeroSplash.value.copy(downloadedVersion = appUpdate.latestVersion)
+                    } else {
+                        target.delete()
+                    }
+                } catch (e: Exception) {
+                    LogUtil.e(AppConfig.TAG, "Update download failed", e)
+                }
+            }
+
+            // Keep the loading screen readable, then open the app.
+            val elapsed = System.currentTimeMillis() - startedAt
+            delay(max(0L, SPLASH_MIN_MILLIS - elapsed))
+            zeroSplash.value = zeroSplash.value.copy(phase = ZeroSplashPhase.Ready)
+            delay(SPLASH_FADE_MILLIS)
+            zeroSplash.value = zeroSplash.value.copy(visible = false)
+        }
+    }
+
+    /** Installs the update APK downloaded by the launch loading screen. */
+    private fun installZeroUpdate() {
+        val apk = zeroUpdateApkFile ?: return
+        if (!apk.exists()) return
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                !packageManager.canRequestPackageInstalls()
+            ) {
+                startActivity(
+                    Intent(
+                        android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:$packageName")
+                    )
+                )
+                return
+            }
+            val uri = FileProvider.getUriForFile(this, "$packageName.cache", apk)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            LogUtil.e(AppConfig.TAG, "Cannot launch update installer", e)
+            toastError(R.string.toast_failure)
         }
     }
 
@@ -132,42 +229,58 @@ class MainActivity : HelperBaseComponentActivity() {
         BackHandler { moveTaskToBack(false) }
         val appUpdate by zeroAppUpdate.collectAsState()
         val coreUpdate by zeroCoreUpdate.collectAsState()
-        MainScreen(
-            mainViewModel = mainViewModel,
-            selectedServerName = mainViewModel.selectedServerName.collectAsState().value,
-            zeroAppUpdate = appUpdate,
-            zeroCoreUpdate = coreUpdate,
-            onOpenZeroUpdate = {
-                val url = appUpdate?.second
-                if (!url.isNullOrBlank()) {
-                    Utils.openUri(this, url)
-                } else {
-                    startActivity(Intent(this, CheckUpdateActivity::class.java))
-                }
-            },
-            onDismissZeroUpdate = {
-                zeroAppUpdate.value = null
-                zeroCoreUpdate.value = null
-            },
-            onAction = { action ->
-                when (action) {
-                    MainAction.ToggleService -> handleFabAction()
-                    MainAction.TestCurrentServer -> handleLayoutTestClick()
-                    MainAction.ImportQRcode -> importQRcode()
-                    MainAction.ImportClipboard -> importClipboard()
-                    MainAction.ImportConfigLocal -> importConfigLocal()
-                    is MainAction.ImportManually -> importManually(action.type)
-                    MainAction.RestartService -> LauncherManager.restartServiceOrStart(this, ::requestServiceStart)
-                    MainAction.LocateSelectedServer -> mainViewModel.triggerLocateSelectedServer()
-                    is MainAction.SelectServer -> setSelectServer(action.guid)
-                    is MainAction.EditServer -> editServer(action.guid, action.profile)
-                    is MainAction.ShareClipboard -> shareToClipboard(action.guid)
-                    is MainAction.ShareFullContent -> shareFullContentAsync(action.guid)
-                    else -> mainViewModel.onAction(action)
-                }
-            },
-            onNavigate = { route -> navigateTo(route) },
-        )
+        val splash by zeroSplash.collectAsState()
+        Box(modifier = Modifier.fillMaxSize()) {
+            MainScreen(
+                mainViewModel = mainViewModel,
+                selectedServerName = mainViewModel.selectedServerName.collectAsState().value,
+                zeroAppUpdate = appUpdate,
+                zeroCoreUpdate = coreUpdate,
+                onOpenZeroUpdate = {
+                    val url = appUpdate?.second
+                    if (!url.isNullOrBlank()) {
+                        Utils.openUri(this@MainActivity, url)
+                    } else {
+                        startActivity(Intent(this@MainActivity, CheckUpdateActivity::class.java))
+                    }
+                },
+                onDismissZeroUpdate = {
+                    zeroAppUpdate.value = null
+                    zeroCoreUpdate.value = null
+                },
+                onAction = { action ->
+                    when (action) {
+                        MainAction.ToggleService -> handleFabAction()
+                        MainAction.TestCurrentServer -> handleLayoutTestClick()
+                        MainAction.ImportQRcode -> importQRcode()
+                        MainAction.ImportClipboard -> importClipboard()
+                        MainAction.ImportConfigLocal -> importConfigLocal()
+                        is MainAction.ImportManually -> importManually(action.type)
+                        MainAction.RestartService -> LauncherManager.restartServiceOrStart(this@MainActivity, ::requestServiceStart)
+                        MainAction.LocateSelectedServer -> mainViewModel.triggerLocateSelectedServer()
+                        is MainAction.SelectServer -> setSelectServer(action.guid)
+                        is MainAction.EditServer -> editServer(action.guid, action.profile)
+                        is MainAction.ShareClipboard -> shareToClipboard(action.guid)
+                        is MainAction.ShareFullContent -> shareFullContentAsync(action.guid)
+                        else -> mainViewModel.onAction(action)
+                    }
+                },
+                onNavigate = { route -> navigateTo(route) },
+            )
+
+            // Launch loading screen sits above everything until it is done.
+            androidx.compose.animation.AnimatedVisibility(
+                visible = splash.visible,
+                enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(200)),
+                exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(320))
+            ) {
+                ZeroSplashScreen(
+                    state = splash,
+                    onInstallUpdate = { installZeroUpdate() },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
     }
 
     private fun shareToClipboard(guid: String): Boolean =

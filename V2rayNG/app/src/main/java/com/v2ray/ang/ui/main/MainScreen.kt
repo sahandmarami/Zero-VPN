@@ -202,7 +202,7 @@ fun MainScreen(
                     when (currentTab) {
                         ZeroBottomTab.HOME -> ZeroHomeTopBar(
                             onMenuClick = { scope.launch { drawerState.open() } },
-                            onSettingsClick = { onNavigate(MainDestination.Settings) }
+                            onSettingsClick = { currentTab = ZeroBottomTab.SETTINGS }
                         )
                         ZeroBottomTab.LOCATIONS -> MainTopBar(
                             isLoading = isLoading,
@@ -235,6 +235,7 @@ fun MainScreen(
                                 }
                             }
                         )
+                        ZeroBottomTab.SETTINGS -> ZeroSettingsTopBar()
                         else -> {}
                     }
                 },
@@ -247,7 +248,6 @@ fun MainScreen(
                                 showSearch = false
                             }
                         },
-                        onOpenSettings = { onNavigate(MainDestination.Settings) },
                         isDarkTheme = isDarkTheme
                     )
                 },
@@ -331,6 +331,13 @@ fun MainScreen(
                                     )
                                 }
                             }
+                        }
+                        ZeroBottomTab.SETTINGS -> {
+                            ZeroSettingsTab(
+                                isRunning = isRunning,
+                                onNavigate = onNavigate,
+                                onModeChanged = { onAction(MainAction.RestartService) }
+                            )
                         }
                         else -> {}
                     }

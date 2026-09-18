@@ -51,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -292,14 +293,21 @@ fun ZeroHomeScreen(
 
         Spacer(Modifier.height(18.dp))
 
-        // --- Gooey power group (ring + melting bolt droplet) --------------
-        GooeyPowerButton(
+        // --- Premium connect button ---------------------------------------
+        ZeroConnectButton(
             isRunning = isRunning,
             isTesting = isTesting,
-            onClick = onToggle,
-            onTest = {
-                if (connected) onTestCurrent() else onTestAll()
-            }
+            onClick = onToggle
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        // --- Real-ping test pill -------------------------------------------
+        ZeroTestPill(
+            connected = connected,
+            isTesting = isTesting,
+            onClick = { if (connected) onTestCurrent() else onTestAll() },
+            hc = hc
         )
 
         Spacer(Modifier.height(14.dp))
@@ -399,199 +407,261 @@ fun ZeroHomeScreen(
 }
 
 // ---------------------------------------------------------------------------
-// Gooey power group — native liquid-gooey remake (blur 6 / contrast 18):
-// a thin neon ring whose bottom melts into a hanging droplet carrying the
-// bolt (real-ping test). Connecting pulls the droplet up into the ring
-// (Liquid.Item melt with the bouncy spring); idle it dangles below.
+// Premium connect button — layered vector design, crisp at every density:
+// ambient neon glow → deep glass disc (neon gradient when active, navy +
+// ring when idle) → inner rim shading → glossy top highlight → power icon.
+// Radar rings pulse while connected; an amber sweep arc spins while testing;
+// press gives a liquid squish (bouncy spring).
 // ---------------------------------------------------------------------------
-private const val RING_RADIUS_DP = 74
-private const val DROP_RADIUS_DP = 17
+private const val CONNECT_SIZE_DP = 208
+private const val DISC_RADIUS_DP = 88
 
 @Composable
-fun GooeyPowerButton(
+fun ZeroConnectButton(
     isRunning: Boolean,
     isTesting: Boolean,
     onClick: () -> Unit,
-    onTest: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val interactionDrop = remember { MutableInteractionSource() }
-    val dropPressed by interactionDrop.collectIsPressedAsState()
 
-    // Liquid squish on press.
     val pressScale by animateFloatAsState(
-        targetValue = if (pressed || dropPressed) 0.965f else 1f,
-        animationSpec = spring(dampingRatio = 0.35f, stiffness = Spring.StiffnessMediumLow),
-        label = "pressScale"
+        targetValue = if (pressed) 0.955f else 1f,
+        animationSpec = spring(dampingRatio = 0.42f, stiffness = Spring.StiffnessMediumLow),
+        label = "connectPress"
     )
 
-    // Melt: droplet hangs below when idle, melts into the ring when connected.
-    val dropGap by animateDpAsState(
-        targetValue = if (isRunning) (-6).dp else 6.dp,
-        animationSpec = spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMediumLow),
-        label = "dropGap"
-    )
-
-    // Gentle liquid pulse (testing breathe + connected shimmer).
-    val pulse = rememberInfiniteTransition(label = "pulse")
-    val pulseT by pulse.animateFloat(
+    val pulse = rememberInfiniteTransition(label = "connectPulse")
+    val radarT by pulse.animateFloat(
         initialValue = 0f,
-        targetValue = (2f * Math.PI.toFloat()),
+        targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2400, easing = LinearEasing),
+            animation = tween(durationMillis = 1900, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
-        label = "pulseT"
+        label = "radarT"
     )
     val spin by pulse.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1100, easing = LinearEasing),
+            animation = tween(durationMillis = 1050, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
-        label = "spin"
+        label = "connectSpin"
     )
-
-    val ringColor = when {
-        isTesting -> colorZeroTesting
-        isRunning -> colorZeroNeon
-        else -> colorZeroIdle
-    }
-    val dropColor = if (isTesting) colorZeroTesting else ringColor
-    val boltTint = if (isRunning || isTesting) Color(0xFF05121F) else Color(0xFF0B1119)
-    val powerTint = when {
-        isTesting -> colorZeroTesting
-        isRunning -> colorZeroNeonSoft
-        else -> Color(0xFF8B99B0)
-    }
-
-    val gooEffect = rememberGooeyEffect(blurDp = 6f, contrast = 18f)
+    val breatheT by pulse.animateFloat(
+        initialValue = 0f,
+        targetValue = (2f * Math.PI.toFloat()),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2600, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "connectBreathe"
+    )
 
     Box(
         modifier = modifier
-            .width(240.dp)
-            .height(212.dp)
+            .size(CONNECT_SIZE_DP.dp)
             .graphicsLayer {
                 scaleX = pressScale
                 scaleY = pressScale
-                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0.35f)
-            },
-        contentAlignment = Alignment.TopCenter
-    ) {
-        // --- Crisp glow layer (outside the goo threshold) ------------------
-        Canvas(modifier = Modifier.matchParentSize()) {
-            val c = Offset(size.width / 2f, RING_RADIUS_DP.dp.toPx())
-            val r = RING_RADIUS_DP.dp.toPx()
-            // soft ambient glow
-            drawCircle(
-                color = ringColor.copy(alpha = if (isRunning || isTesting) 0.20f else 0.12f),
-                radius = r,
-                center = c,
-                style = Stroke(width = 10.dp.toPx())
-            )
-            // connected shimmer ring
-            if (isRunning && !isTesting) {
-                drawCircle(
-                    color = colorZeroNeonSoft.copy(alpha = 0.28f + 0.14f * sin(pulseT)),
-                    radius = r + 5.dp.toPx() + 2.5f.dp.toPx() * sin(pulseT),
-                    center = c,
-                    style = Stroke(width = 1.4.dp.toPx())
-                )
             }
-            // testing sweep arc
+            .clip(CircleShape)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        // --- State glow + radar + test arc ----------------------------------
+        Canvas(modifier = Modifier.matchParentSize()) {
+            val c = Offset(size.width / 2f, size.height / 2f)
+            val r = DISC_RADIUS_DP.dp.toPx()
+
+            // Ambient glow behind the disc
+            val glowColor = if (isTesting) colorZeroTesting else colorZeroNeon
+            val glowAlpha = when {
+                isTesting -> 0.26f + 0.08f * sin(breatheT)
+                isRunning -> 0.30f + 0.06f * sin(breatheT)
+                else -> 0.16f
+            }
+            drawRect(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        glowColor.copy(alpha = glowAlpha),
+                        Color.Transparent
+                    ),
+                    center = c,
+                    radius = r * 1.5f
+                )
+            )
+
+            // Radar rings while connected
+            if (isRunning && !isTesting) {
+                for (phase in 0..1) {
+                    val t = (radarT + phase * 0.5f) % 1f
+                    drawCircle(
+                        color = colorZeroNeonSoft.copy(alpha = (1f - t) * 0.30f),
+                        radius = r + t * 26.dp.toPx(),
+                        center = c,
+                        style = Stroke(width = (2.4f - 1.5f * t).dp.toPx())
+                    )
+                }
+            }
+
+            // Testing sweep arc
             if (isTesting) {
+                val arcR = r + 8.dp.toPx()
                 drawArc(
                     color = colorZeroTesting,
                     startAngle = spin,
-                    sweepAngle = 92f,
+                    sweepAngle = 95f,
                     useCenter = false,
-                    topLeft = Offset(c.x - r, c.y - r),
-                    size = Size(r * 2, r * 2),
-                    style = Stroke(width = 3.5.dp.toPx(), cap = StrokeCap.Round)
+                    topLeft = Offset(c.x - arcR, c.y - arcR),
+                    size = Size(arcR * 2f, arcR * 2f),
+                    style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round)
                 )
             }
         }
 
-        // --- Goo layer: ring + droplet melt together ------------------------
-        Canvas(
-            modifier = Modifier
-                .matchParentSize()
-                .graphicsLayer {
-                    compositingStrategy = CompositingStrategy.Offscreen
-                    renderEffect = gooEffect
-                }
-        ) {
-            val cx = size.width / 2f
-            val ringR = RING_RADIUS_DP.dp.toPx()
-            val ringC = Offset(cx, ringR)
-            // thin neon ring
+        // --- Glass disc -------------------------------------------------------
+        Canvas(modifier = Modifier.matchParentSize()) {
+            val c = Offset(size.width / 2f, size.height / 2f)
+            val r = DISC_RADIUS_DP.dp.toPx()
+
+            // Ground shadow under the disc
             drawCircle(
-                color = ringColor,
-                radius = ringR,
-                center = ringC,
-                style = Stroke(width = 3.5.dp.toPx())
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color.Black.copy(alpha = 0.40f),
+                        Color.Transparent
+                    ),
+                    center = Offset(c.x, c.y + 16.dp.toPx()),
+                    radius = r * 1.08f
+                ),
+                radius = r * 1.08f,
+                center = Offset(c.x, c.y + 16.dp.toPx())
             )
-            // hanging droplet (breathe while testing)
-            val dropScale = if (isTesting) 1f + 0.10f * sin(pulseT * 2f) else 1f
-            val dropR = DROP_RADIUS_DP.dp.toPx() * dropScale
-            val dropC = Offset(
-                cx,
-                ringR * 2f + dropGap.toPx() + dropR
+
+            // Main disc
+            if (isRunning || isTesting) {
+                drawCircle(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(Color(0xFF4ED8FF), Color(0xFF0068D2)),
+                        startY = c.y - r,
+                        endY = c.y + r
+                    ),
+                    radius = r,
+                    center = c
+                )
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.22f),
+                    radius = r,
+                    center = c,
+                    style = Stroke(width = 1.6.dp.toPx())
+                )
+            } else {
+                drawCircle(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(Color(0xFF13243C), Color(0xFF0B1728)),
+                        startY = c.y - r,
+                        endY = c.y + r
+                    ),
+                    radius = r,
+                    center = c
+                )
+                drawCircle(
+                    color = colorZeroNeon.copy(alpha = 0.85f),
+                    radius = r,
+                    center = c,
+                    style = Stroke(width = 2.2.dp.toPx())
+                )
+                drawCircle(
+                    color = colorZeroNeon.copy(alpha = 0.16f),
+                    radius = r + 7.dp.toPx(),
+                    center = c,
+                    style = Stroke(width = 1.dp.toPx())
+                )
+            }
+
+            // Inner rim shading (bottom inner shadow)
+            drawArc(
+                color = Color.Black.copy(alpha = 0.26f),
+                startAngle = 30f,
+                sweepAngle = 120f,
+                useCenter = false,
+                topLeft = Offset(c.x - r, c.y - r),
+                size = Size(r * 2f, r * 2f),
+                style = Stroke(width = 7.dp.toPx(), cap = StrokeCap.Round)
             )
-            drawCircle(color = dropColor, radius = dropR, center = dropC)
+
+            // Glossy highlight on the top half
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.30f),
+                        Color.White.copy(alpha = 0.06f),
+                        Color.Transparent
+                    ),
+                    center = Offset(c.x, c.y - r * 0.42f),
+                    radius = r * 0.95f
+                ),
+                radius = r,
+                center = c
+            )
         }
 
-        // --- Power icon (clickable) -----------------------------------------
-        Box(
-            modifier = Modifier
-                .offset(y = (RING_RADIUS_DP - 56).dp)
-                .size(112.dp)
-                .clip(CircleShape)
-                .clickable(
-                    interactionSource = interaction,
-                    indication = null,
-                    role = Role.Button,
-                    onClick = onClick
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_zero_power_24dp),
-                contentDescription = stringResource(
-                    if (isRunning) R.string.zero_disconnect else R.string.zero_connect
-                ),
-                tint = powerTint,
-                modifier = Modifier.size(46.dp)
-            )
-        }
+        // --- Power icon -------------------------------------------------------
+        Icon(
+            painter = painterResource(R.drawable.ic_zero_power_24dp),
+            contentDescription = stringResource(
+                if (isRunning) R.string.zero_disconnect else R.string.zero_connect
+            ),
+            tint = if (isRunning || isTesting) Color.White else colorZeroNeonSoft,
+            modifier = Modifier.size(64.dp)
+        )
+    }
+}
 
-        // --- Bolt inside the droplet (real-ping test, clickable) ------------
-        val dropCenterY = (RING_RADIUS_DP * 2).dp + dropGap + DROP_RADIUS_DP.dp
-        Box(
-            modifier = Modifier
-                .offset(y = dropCenterY - 22.dp)
-                .size(44.dp)
-                .clip(CircleShape)
-                .clickable(
-                    interactionSource = interactionDrop,
-                    indication = null,
-                    role = Role.Button,
-                    onClick = onTest
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_flash_on_24dp),
-                contentDescription = stringResource(
-                    if (isRunning) R.string.zero_test_ping else R.string.zero_test_all
-                ),
-                tint = boltTint,
-                modifier = Modifier.size(18.dp)
-            )
-        }
+// ---------------------------------------------------------------------------
+// Real-ping test pill under the connect button.
+// ---------------------------------------------------------------------------
+@Composable
+private fun ZeroTestPill(
+    connected: Boolean,
+    isTesting: Boolean,
+    onClick: () -> Unit,
+    hc: ZeroHomeColors,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(hc.pillBg)
+            .border(1.dp, hc.cardBorder, RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_flash_on_24dp),
+            contentDescription = null,
+            tint = if (isTesting) colorZeroTesting else colorZeroNeonSoft,
+            modifier = Modifier.size(16.dp)
+        )
+        Text(
+            text = stringResource(
+                if (connected) R.string.zero_test_ping else R.string.zero_test_all
+            ),
+            color = hc.textSecondary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 

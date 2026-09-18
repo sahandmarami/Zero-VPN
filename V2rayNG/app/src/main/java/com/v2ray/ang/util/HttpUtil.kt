@@ -271,7 +271,8 @@ object HttpUtil {
 
     fun downloadToFile(
         request: UrlContentRequest,
-        targetFile: File
+        targetFile: File,
+        onProgress: ((percent: Int, downloadedBytes: Long, totalBytes: Long) -> Unit)? = null
     ): Boolean {
         val url = request.url ?: return false
         val client = buildOkHttpClient(request.timeout, request.httpPort, request.proxyUsername, request.proxyPassword, followRedirects = true)
@@ -290,9 +291,25 @@ object HttpUtil {
                     return false
                 }
                 val body = response.body ?: return false
+                val totalBytes = body.contentLength()
                 body.byteStream().use { input ->
                     targetFile.outputStream().use { output ->
-                        input.copyTo(output)
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE * 8)
+                        var downloaded = 0L
+                        var lastReported = -1
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read == -1) break
+                            output.write(buffer, 0, read)
+                            downloaded += read
+                            if (onProgress != null && totalBytes > 0) {
+                                val percent = (downloaded * 100 / totalBytes).toInt()
+                                if (percent != lastReported) {
+                                    lastReported = percent
+                                    onProgress(percent, downloaded, totalBytes)
+                                }
+                            }
+                        }
                     }
                 }
                 true

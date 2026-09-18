@@ -60,7 +60,6 @@ private val NAV_BAR_HEIGHT = 72.dp
 fun ZeroBottomNav(
     selectedTab: ZeroBottomTab,
     onSelectTab: (ZeroBottomTab) -> Unit,
-    onOpenSettings: () -> Unit,
     isDarkTheme: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -69,7 +68,7 @@ fun ZeroBottomNav(
     val activeIndex = when (selectedTab) {
         ZeroBottomTab.HOME -> 0
         ZeroBottomTab.LOCATIONS -> 1
-        ZeroBottomTab.SETTINGS -> 0
+        ZeroBottomTab.SETTINGS -> 2
     }
     val gooEffect = rememberGooeyEffect(blurDp = 6f, contrast = 18f)
 
@@ -155,9 +154,9 @@ fun ZeroBottomNav(
                 ZeroNavItem(
                     iconRes = R.drawable.ic_settings_24dp,
                     label = stringResource(R.string.zero_tab_settings),
-                    selected = false, // opens the settings screen; no tab state
+                    selected = selectedTab == ZeroBottomTab.SETTINGS,
                     inactiveColor = inactiveColor,
-                    onClick = onOpenSettings,
+                    onClick = { onSelectTab(ZeroBottomTab.SETTINGS) },
                     modifier = Modifier.weight(1f)
                 )
             }

@@ -23,6 +23,28 @@
     <string name="zero_tab_settings">Settings</string>
     <string name="zero_no_server">No server selected</string>
     <string name="zero_open_locations">Tap to choose a server</string>
+    <!-- Zero VPN launch loading screen -->
+    <string name="zero_splash_checking">Checking for updates from the official source…</string>
+    <string name="zero_splash_downloading">Downloading update…</string>
+    <string name="zero_splash_ready">Opening Zero VPN…</string>
+    <string name="zero_splash_version">version %1$s</string>
+    <string name="zero_splash_core_ok">Xray core %1$s — up to date</string>
+    <string name="zero_splash_core_old">Xray core %1$s — newer core available</string>
+    <string name="zero_install_update">Install update</string>
+    <!-- Zero VPN settings tab -->
+    <string name="zero_set_personalize">Personalization</string>
+    <string name="zero_set_connection">Connection</string>
+    <string name="zero_set_update">Updates</string>
+    <string name="zero_set_more">More</string>
+    <string name="zero_auto_update">Auto-update on launch</string>
+    <string name="zero_auto_update_summary">Check the official source every time the app opens and download new versions</string>
+    <string name="zero_core_version">Xray core</string>
+    <string name="zero_core_version_value">Version %1$s (auto-updates with app updates)</string>
+    <string name="zero_core_version_unknown">Embedded in the app</string>
+    <string name="zero_set_per_app_hint">Choose which apps go through the VPN</string>
+    <string name="zero_set_routing_hint">Routing rules and domains</string>
+    <!-- Zero VPN WireGuard -->
+    <string name="zero_awg_notice">AmneziaWG parameters detected — this build runs standard WireGuard</string>
     <string name="app_widget_name">Switch</string>
     <string name="app_tile_name">Switch</string>
     <string name="app_tile_first_use">Add a profile in the app before using this feature.</string>

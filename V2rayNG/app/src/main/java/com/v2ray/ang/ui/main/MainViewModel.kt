@@ -513,12 +513,19 @@ class MainViewModel(
         launchLoading {
             withContext(ioDispatcher) {
                 try {
+                    // Zero VPN: AmneziaWG obfuscation params (Jc/Jmin/Jmax/S1/S2/H1-H4)
+                    // are not supported by the embedded Xray core — import as standard
+                    // WireGuard and tell the user.
+                    val hasAwgParams = configText.contains("[Interface]", ignoreCase = true) &&
+                            Regex("(?im)^\\s*(Jc|Jmin|Jmax|S1|S2|H1|H2|H3|H4)\\s*=")
+                                .containsMatchIn(configText)
                     val (count, countSub) = dataSource.importBatchConfig(
                         configText, uiState.value.selectedGroupId, true
                     )
                     when {
                         count > 0 -> {
                             toast(dataSource.getString(R.string.title_import_config_count, count))
+                            if (hasAwgParams) toast(dataSource.getString(R.string.zero_awg_notice))
                             setupGroupTab(forceRefresh = true)
                         }
 
