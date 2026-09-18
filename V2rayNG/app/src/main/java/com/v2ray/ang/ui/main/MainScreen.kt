@@ -1,5 +1,14 @@
 package com.v2ray.ang.ui.main
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -284,7 +293,28 @@ fun MainScreen(
                         .fillMaxSize()
                         .padding(innerPadding)
                 ) {
-                    when (currentTab) {
+                    // Directional slide + fade between tabs — keeps the switch
+                    // feeling liquid and premium, in sync with the goo bar.
+                    AnimatedContent(
+                        targetState = currentTab,
+                        transitionSpec = {
+                            val forward = targetState.ordinal >= initialState.ordinal
+                            val dir = if (forward) 1 else -1
+                            (
+                                slideInHorizontally(
+                                    animationSpec = tween(300, easing = FastOutSlowInEasing)
+                                ) { full -> dir * full / 5 } +
+                                    fadeIn(tween(300, easing = LinearOutSlowInEasing))
+                                ) togetherWith (
+                                slideOutHorizontally(
+                                    animationSpec = tween(240, easing = FastOutSlowInEasing)
+                                ) { full -> -dir * full / 6 } +
+                                    fadeOut(tween(160))
+                                )
+                        },
+                        label = "zeroTabContent"
+                    ) { tab ->
+                    when (tab) {
                         ZeroBottomTab.HOME -> {
                             ZeroUpdateBanners(
                                 appUpdateVersion = zeroAppUpdate?.first,
@@ -367,6 +397,7 @@ fun MainScreen(
                             )
                         }
                         else -> {}
+                    }
                     }
                 }
             }

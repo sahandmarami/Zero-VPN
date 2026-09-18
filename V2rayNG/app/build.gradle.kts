@@ -13,8 +13,8 @@ android {
         applicationId = "com.zerovpn.app"
         minSdk = 24
         targetSdk = 37
-        versionCode = 105
-        versionName = "1.4.0"
+        versionCode = 106
+        versionName = "1.4.1"
 
         val abiFilterList = (properties["ABI_FILTERS"] as? String)?.split(';')
         splits {
