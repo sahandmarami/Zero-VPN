@@ -65,8 +65,8 @@ private val LightColor = lightColorScheme(
 )
 
 private val DarkColor = darkColorScheme(
-    primary = Color(0xFF00C8FF), // NEON Blue Glow
-    onPrimary = Color(0xFF00263E), // Deep Navy
+    primary = Color(0xFF00A8F5), // Icon Neon Ring Blue
+    onPrimary = Color(0xFF041224), // Deep Navy
     primaryContainer = Color(0xFF0A4A73), // Neon Deep
     onPrimaryContainer = Color(0xFFCBEFFF), // Pale Neon
     secondary = Color(0xFF4D8DFF), // Electric Blue Glow
@@ -81,9 +81,9 @@ private val DarkColor = darkColorScheme(
     errorContainer = Color(0xFF93000A), // Dark Red
     onError = Color(0xFF690005), // Deep Red
     onErrorContainer = Color(0xFFFFDAD6), // Light Red
-    background = Color(0xFF05070E), // Zero Black Navy
+    background = Color(0xFF030813), // Zero Icon Navy
     onBackground = Color(0xFFDDE7F5), // Ice Blue White
-    surface = Color(0xFF0A101E), // Deep Navy
+    surface = Color(0xFF081428), // Deep Navy
     onSurface = Color(0xFFDDE7F5), // Ice Blue White
     surfaceVariant = Color(0xFF15223B), // Midnight Blue
     onSurfaceVariant = Color(0xFFA8BBD6), // Blue Gray
@@ -91,14 +91,14 @@ private val DarkColor = darkColorScheme(
     outlineVariant = Color(0xFF273B58), // Dark Steel
     inverseSurface = Color(0xFFDDE7F5), // Ice Blue White
     inverseOnSurface = Color(0xFF0A101E), // Deep Navy
-    inversePrimary = Color(0xFF0084D4), // Neon Blue
+    inversePrimary = Color(0xFF35C6FF), // Neon Glow
     scrim = Color(0xFF000000), // Black
-    surfaceTint = Color(0xFF00C8FF), // NEON Glow
-    surfaceContainerLowest = Color(0xFF030509), // Void
-    surfaceContainerLow = Color(0xFF0A101E), // Deep Navy
-    surfaceContainer = Color(0xFF0E1526), // Midnight
-    surfaceContainerHigh = Color(0xFF141D33), // Midnight Blue
-    surfaceContainerHighest = Color(0xFF1B2742), // Twilight Blue
+    surfaceTint = Color(0xFF00A8F5), // Icon Neon
+    surfaceContainerLowest = Color(0xFF02060F), // Icon Void
+    surfaceContainerLow = Color(0xFF081428), // Deep Navy
+    surfaceContainer = Color(0xFF0C1A32), // Midnight
+    surfaceContainerHigh = Color(0xFF12233E), // Midnight Blue
+    surfaceContainerHighest = Color(0xFF1A2C4A), // Twilight Blue
 )
 
 // Semantic Colors
@@ -111,10 +111,10 @@ val colorFabInactiveDark = Color(0xFF273B58) // Dark Steel
 val dividerColorLight = Color(0xFFE0E8F2) // Light Blue Gray
 val dividerColorDark = Color(0xFF273B58) // Dark Steel
 
-// Zero VPN neon gradient tokens
-val colorNeonCyan = Color(0xFF00E5FF) // Neon Cyan
-val colorNeonBlue = Color(0xFF2979FF) // Electric Blue
-val colorNeonGlow = Color(0xFF00C8FF) // Neon Glow
+// Zero VPN neon gradient tokens — sampled from the real icon
+val colorNeonCyan = Color(0xFF35C6FF) // Icon Glow Cyan
+val colorNeonBlue = Color(0xFF0E7BFF) // Electric Blue
+val colorNeonGlow = Color(0xFF00A8F5) // Icon Ring Neon
 val colorDisconnectRed = Color(0xFFFF3D71) // Neon Red
 val colorDisconnectOrange = Color(0xFFFF7A45) // Neon Orange
 
