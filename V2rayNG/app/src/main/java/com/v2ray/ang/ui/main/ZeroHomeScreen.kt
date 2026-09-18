@@ -49,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -60,6 +61,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,6 +69,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.v2ray.ang.R
 import com.v2ray.ang.handler.CoreUpdateManager
+import com.v2ray.ang.handler.GeoLookupManager
 import com.v2ray.ang.ui.compose.LocalDarkTheme
 import com.v2ray.ang.ui.compose.rememberGooeyEffect
 import kotlinx.coroutines.delay
@@ -95,6 +98,13 @@ internal fun countryCodeToFlagEmoji(code: String?): String? {
     val base = 0x1F1E6 - 'A'.code
     return String(Character.toChars(c[0].code + base)) +
         String(Character.toChars(c[1].code + base))
+}
+
+/** Localized country name (follows the app language) for an ISO-3166 code. */
+internal fun localizedCountryName(code: String): String? = try {
+    java.util.Locale("", code).displayCountry.takeIf { it.isNotBlank() }
+} catch (_: Exception) {
+    null
 }
 
 /** Formats seconds as HH:MM:SS (or MM:SS below one hour). */
@@ -146,6 +156,10 @@ private data class ZeroHomeColors(
     val cardBg: Color,
     val cardBorder: Color,
     val pillBg: Color,
+    val accent: Color,
+    val pingGood: Color,
+    val pingMid: Color,
+    val pingBad: Color,
 )
 
 @Composable
@@ -157,12 +171,20 @@ private fun zeroHomeColors(): ZeroHomeColors {
         cardBg = Color(0xFF141A24),   // solid charcoal like the reference cards
         cardBorder = Color(0xFF212C3C),
         pillBg = Color(0xFF12171F),   // solid dark pill
+        accent = colorZeroNeonSoft,   // light glow blue
+        pingGood = colorZeroPingGood,
+        pingMid = colorZeroPingMid,
+        pingBad = colorZeroPingBad,
     ) else ZeroHomeColors(
-        textPrimary = Color(0xFF12192A),
-        textSecondary = Color(0xFF5A6B85),
+        textPrimary = Color(0xFF0B1B33),
+        textSecondary = Color(0xFF54678A),
         cardBg = Color(0xFFFFFFFF),
-        cardBorder = Color(0xFFE2E9F4),
-        pillBg = Color(0xFFF1F4F9),
+        cardBorder = Color(0xFFD9E4F6),
+        pillBg = Color(0xFFEBF2FD),   // pale azure pill
+        accent = Color(0xFF0084D4),   // deeper neon for bright surfaces
+        pingGood = Color(0xFF0091D6),
+        pingMid = Color(0xFFDD8A00),
+        pingBad = Color(0xFFE23A5F),
     )
 }
 
@@ -226,6 +248,7 @@ fun ZeroHomeScreen(
     status: MainStatus,
     selectedServerName: String,
     selectedServerDelay: Long,
+    selectedServerGeo: GeoLookupManager.ServerGeo? = null,
     onToggle: () -> Unit,
     onTestCurrent: () -> Unit,
     onTestAll: () -> Unit,
@@ -279,7 +302,7 @@ fun ZeroHomeScreen(
         }
         val statusColor = when {
             isTesting -> colorZeroTesting
-            connected -> colorZeroNeonSoft
+            connected -> hc.accent
             else -> hc.textSecondary
         }
         Text(
@@ -315,13 +338,26 @@ fun ZeroHomeScreen(
         // --- Big ping ------------------------------------------------------
         val testDelay = (status as? MainStatus.ConnectionTest)?.result?.delayMillis
         val shownDelay = testDelay ?: selectedServerDelay.takeIf { it > 0 }
+        // Neon gradient on the number while the tunnel is alive.
+        val pingNumberStyle = TextStyle(
+            fontSize = 54.sp,
+            fontWeight = FontWeight.Black,
+            lineHeight = 58.sp
+        ).let { base ->
+            if (connected || isTesting) {
+                base.copy(
+                    brush = Brush.horizontalGradient(
+                        listOf(hc.accent, colorZeroNeonSoft)
+                    )
+                )
+            } else {
+                base.copy(color = hc.textPrimary)
+            }
+        }
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 text = if (isTesting) "…" else shownDelay?.takeIf { it >= 0 }?.toString() ?: "—",
-                color = hc.textPrimary,
-                fontSize = 54.sp,
-                fontWeight = FontWeight.Black,
-                lineHeight = 58.sp
+                style = pingNumberStyle
             )
             if (!isTesting && shownDelay != null && shownDelay >= 0) {
                 Spacer(Modifier.width(6.dp))
@@ -368,18 +404,25 @@ fun ZeroHomeScreen(
             ZeroStatPill(
                 value = ZeroStatsTracker.jitterMs?.toString() ?: "—",
                 label = stringResource(R.string.zero_jitter),
+                valueColor = hc.accent,
                 hc = hc,
                 modifier = Modifier.weight(1f)
             )
             ZeroStatPill(
                 value = "${ZeroStatsTracker.lossPercent}%",
                 label = stringResource(R.string.zero_loss),
+                valueColor = when {
+                    ZeroStatsTracker.lossPercent == 0 -> hc.pingGood
+                    ZeroStatsTracker.lossPercent <= 25 -> hc.pingMid
+                    else -> hc.pingBad
+                },
                 hc = hc,
                 modifier = Modifier.weight(1f)
             )
             ZeroStatPill(
                 value = uptimeText,
                 label = stringResource(R.string.zero_uptime),
+                valueColor = hc.accent,
                 hc = hc,
                 modifier = Modifier.weight(1f)
             )
@@ -388,13 +431,23 @@ fun ZeroHomeScreen(
         Spacer(Modifier.height(20.dp))
 
         // --- Current server card -------------------------------------------
-        val country = (status as? MainStatus.ConnectionTest)?.result?.country
-        val flag = countryCodeToFlagEmoji(country)
+        // True exit country/IP come from a live tunnel test; the entry-side
+        // geo lookup fills the card in before any test has run.
+        val testResult = status as? MainStatus.ConnectionTest
+        val exitCountry = testResult?.result?.country
+        val exitIp = testResult?.result?.ipAddress
+        val effCountryCode = exitCountry ?: selectedServerGeo?.countryCode
+        val effIp = exitIp ?: selectedServerGeo?.ipAddress
+        val flag = countryCodeToFlagEmoji(effCountryCode)
+        val countryLine = listOf(
+            effCountryCode?.let { localizedCountryName(it) ?: it },
+            effIp
+        ).filterNotNull().joinToString("  ·  ")
         ZeroServerCard(
             serverName = selectedServerName.ifBlank {
                 stringResource(R.string.zero_no_server)
             },
-            countryLabel = country,
+            countryLabel = countryLine.takeIf { it.isNotBlank() },
             flagEmoji = flag,
             pingMillis = shownDelay?.takeIf { it >= 0 },
             onClick = onOpenLocations,
@@ -651,7 +704,7 @@ private fun ZeroTestPill(
         Icon(
             painter = painterResource(R.drawable.ic_flash_on_24dp),
             contentDescription = null,
-            tint = if (isTesting) colorZeroTesting else colorZeroNeonSoft,
+            tint = if (isTesting) colorZeroTesting else hc.accent,
             modifier = Modifier.size(16.dp)
         )
         Text(
@@ -672,6 +725,7 @@ private fun ZeroTestPill(
 private fun ZeroStatPill(
     value: String,
     label: String,
+    valueColor: Color,
     hc: ZeroHomeColors,
     modifier: Modifier = Modifier
 ) {
@@ -685,7 +739,7 @@ private fun ZeroStatPill(
     ) {
         Text(
             text = value,
-            color = hc.textPrimary,
+            color = valueColor,
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
@@ -716,12 +770,20 @@ private fun ZeroServerCard(
     hc: ZeroHomeColors,
     modifier: Modifier = Modifier
 ) {
+    val dark = LocalDarkTheme.current
+    val cardShape = RoundedCornerShape(18.dp)
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(hc.cardBg, RoundedCornerShape(18.dp))
-            .border(1.dp, hc.cardBorder, RoundedCornerShape(18.dp))
-            .clip(RoundedCornerShape(18.dp))
+            .shadow(
+                elevation = if (dark) 0.dp else 10.dp,
+                shape = cardShape,
+                ambientColor = Color(0x2E0084D4),
+                spotColor = Color(0x330084D4)
+            )
+            .background(hc.cardBg, cardShape)
+            .border(1.dp, hc.cardBorder, cardShape)
+            .clip(cardShape)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -753,9 +815,9 @@ private fun ZeroServerCard(
             Text(
                 text = stringResource(R.string.server_test_delay_value, it),
                 color = when {
-                    it <= 120 -> colorZeroPingGood
-                    it <= 400 -> colorZeroPingMid
-                    else -> colorZeroPingBad
+                    it <= 120 -> hc.pingGood
+                    it <= 400 -> hc.pingMid
+                    else -> hc.pingBad
                 },
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold

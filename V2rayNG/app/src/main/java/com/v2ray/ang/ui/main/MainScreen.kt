@@ -47,6 +47,7 @@ fun MainScreen(
     onAction: (MainAction) -> Unit,
     onNavigate: (MainDestination) -> Unit,
     selectedServerName: String = "",
+    selectedServerGeo: com.v2ray.ang.handler.GeoLookupManager.ServerGeo? = null,
     zeroAppUpdate: Pair<String, String>? = null,
     zeroCoreUpdate: CoreUpdateManager.CoreUpdateResult? = null,
     onOpenZeroUpdate: () -> Unit = {},
@@ -165,34 +166,59 @@ fun MainScreen(
         }
     ) {
         // Zero VPN: clean reference-style backdrop — deep charcoal-navy with a
-        // soft neon-blue glow behind the status area (light/dark rhythm).
+        // soft neon-blue glow behind the status area. The light mode gets a
+        // pale azure sky with layered neon glows for a livelier feel.
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(if (isDarkTheme) Color(0xFF070B11) else Color(0xFFF2F6FB))
+                .background(if (isDarkTheme) Color(0xFF070B11) else Color(0xFFF4F8FE))
         ) {
             Canvas(modifier = Modifier.matchParentSize()) {
-                val glowColor = if (isDarkTheme) Color(0xFF0A5E96) else Color(0xFF35C6FF)
-                drawRect(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            glowColor.copy(alpha = if (isDarkTheme) 0.32f else 0.18f),
-                            Color.Transparent
-                        ),
-                        center = Offset(size.width / 2f, size.height * 0.13f),
-                        radius = size.width * 0.95f
+                if (isDarkTheme) {
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0xFF0A5E96).copy(alpha = 0.32f), Color.Transparent),
+                            center = Offset(size.width / 2f, size.height * 0.13f),
+                            radius = size.width * 0.95f
+                        )
                     )
-                )
-                drawRect(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            glowColor.copy(alpha = if (isDarkTheme) 0.10f else 0.08f),
-                            Color.Transparent
-                        ),
-                        center = Offset(size.width / 2f, size.height * 0.72f),
-                        radius = size.width * 0.9f
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0xFF35C6FF).copy(alpha = 0.09f), Color.Transparent),
+                            center = Offset(size.width * 0.1f, size.height * 0.04f),
+                            radius = size.width * 0.75f
+                        )
                     )
-                )
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0xFF0A5E96).copy(alpha = 0.10f), Color.Transparent),
+                            center = Offset(size.width / 2f, size.height * 0.72f),
+                            radius = size.width * 0.9f
+                        )
+                    )
+                } else {
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0xFF35C6FF).copy(alpha = 0.30f), Color.Transparent),
+                            center = Offset(size.width / 2f, size.height * 0.10f),
+                            radius = size.width * 1.0f
+                        )
+                    )
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0xFF4D8DFF).copy(alpha = 0.16f), Color.Transparent),
+                            center = Offset(size.width * 0.08f, size.height * 0.04f),
+                            radius = size.width * 0.8f
+                        )
+                    )
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0xFF5AA8FF).copy(alpha = 0.14f), Color.Transparent),
+                            center = Offset(size.width / 2f, size.height * 0.86f),
+                            radius = size.width * 0.95f
+                        )
+                    )
+                }
             }
 
             Scaffold(
@@ -271,6 +297,7 @@ fun MainScreen(
                                 status = uiState.status,
                                 selectedServerName = selectedServerName,
                                 selectedServerDelay = selectedServerDelay,
+                                selectedServerGeo = selectedServerGeo,
                                 onToggle = { onAction(MainAction.ToggleService) },
                                 onTestCurrent = { onAction(MainAction.TestCurrentServer) },
                                 onTestAll = { onAction(MainAction.TestRealAllServers) },

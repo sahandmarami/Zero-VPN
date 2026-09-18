@@ -234,6 +234,7 @@ class MainActivity : HelperBaseComponentActivity() {
             MainScreen(
                 mainViewModel = mainViewModel,
                 selectedServerName = mainViewModel.selectedServerName.collectAsState().value,
+                selectedServerGeo = mainViewModel.selectedServerGeo.collectAsState().value,
                 zeroAppUpdate = appUpdate,
                 zeroCoreUpdate = coreUpdate,
                 onOpenZeroUpdate = {

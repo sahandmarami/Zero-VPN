@@ -18,6 +18,7 @@ import com.v2ray.ang.extension.delay
 import com.v2ray.ang.extension.isComplexType
 import com.v2ray.ang.extension.matchesPattern
 import com.v2ray.ang.extension.moveItem
+import com.v2ray.ang.handler.GeoLookupManager
 import com.v2ray.ang.ui.base.BaseViewModel
 import com.v2ray.ang.util.LogUtil
 import kotlinx.coroutines.CancellationException
@@ -32,13 +33,17 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import java.util.regex.PatternSyntaxException
@@ -92,6 +97,67 @@ class MainViewModel(
         .map { it.selectedGuid?.let { guid -> dataSource.decodeServerConfig(guid)?.remarks }.orEmpty() }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    // ---------- Zero VPN: per-server geo (country flag + IP) ----------
+    private val _geoByHost = MutableStateFlow<Map<String, GeoLookupManager.ServerGeo>>(emptyMap())
+
+    /** Geo info keyed by the server host address ("profile.server"). */
+    val geoByHost: StateFlow<Map<String, GeoLookupManager.ServerGeo>> = _geoByHost.asStateFlow()
+
+    private val geoBookMutex = Mutex()
+    private val geoInFlight = mutableSetOf<String>()
+    private val geoFailedHosts = mutableSetOf<String>()
+
+    /** Geo info of the currently selected server (entry side). */
+    val selectedServerGeo: StateFlow<GeoLookupManager.ServerGeo?> = combine(
+        _uiState, _geoByHost
+    ) { state, geo ->
+        state.selectedGuid?.let { guid ->
+            dataSource.decodeServerConfig(guid)?.server?.trim()?.let { geo[it] }
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /**
+     * Kick off background country/IP lookups for the given servers.
+     * Skipped while the VPN is running: through the tunnel every host would
+     * resolve to the same exit IP. Cached hosts answer instantly.
+     */
+    private fun requestGeoEnrichment(servers: List<ServersCache>) {
+        if (uiState.value.isRunning) return
+        val hosts = servers.mapNotNull { it.profile.server?.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+        if (hosts.isEmpty()) return
+        viewModelScope.launch(ioDispatcher) {
+            val pending = geoBookMutex.withLock {
+                hosts.filter {
+                    it !in geoInFlight && it !in geoFailedHosts && _geoByHost.value[it] == null
+                }.also { geoInFlight.addAll(it) }
+            }
+            if (pending.isEmpty()) return@launch
+            val gate = Semaphore(3)
+            pending.map { host ->
+                launch {
+                    gate.withPermit {
+                        val geo = try {
+                            GeoLookupManager.lookupHostCached(host)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            null
+                        }
+                        geoBookMutex.withLock { geoInFlight.remove(host) }
+                        if (geo != null) {
+                            geoBookMutex.withLock { geoFailedHosts.remove(host) }
+                            _geoByHost.update { it + (host to geo) }
+                        } else {
+                            geoBookMutex.withLock { geoFailedHosts.add(host) }
+                        }
+                    }
+                }
+            }.joinAll()
+        }
+    }
 
     // ---------- Keyword filtering ----------
     @Volatile
@@ -396,6 +462,7 @@ class MainViewModel(
             servers = filteredServers,
             rows = buildServerRows(groupId, filteredServers)
         )
+        requestGeoEnrichment(filteredServers)
     }
 
     private fun buildServerRows(groupId: String, servers: List<ServersCache>): List<ServerRowUiModel> {
@@ -941,6 +1008,8 @@ class MainViewModel(
                 else if (running) MainStatus.Connected else MainStatus.Disconnected
             )
         }
+        // Once the tunnel is down, entry-side geo lookups are safe again.
+        if (!running) requestGeoEnrichment(currentServers())
     }
 
     override fun onCleared() {

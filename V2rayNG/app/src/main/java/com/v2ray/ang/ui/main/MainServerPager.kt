@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -82,6 +83,7 @@ fun GroupPagerPage(
         mainViewModel.serverGroupState(groupId)
     }
     val groupState by groupStateFlow.collectAsStateWithLifecycle()
+    val geoByHost by mainViewModel.geoByHost.collectAsStateWithLifecycle()
     val canReorder = groupId.isNotEmpty() && searchQuery.isEmpty()
     val actions = remember(
         onSelectServer,
@@ -108,6 +110,7 @@ fun GroupPagerPage(
         lazyListStates = lazyListStates,
         lazyGridStates = lazyGridStates,
         actions = actions,
+        geoByHost = geoByHost,
         onLocateHandled = { mainViewModel.onAction(MainAction.LocateHandled) },
         onMoveServer = { fromIndex, toIndex ->
             mainViewModel.moveServer(groupId, fromIndex, toIndex)
@@ -124,6 +127,15 @@ private class ServerRowActions(
     val remove: (String) -> Unit,
 )
 
+/** Resolves the row's host to its geo entry (flag country + IP). */
+private fun rowGeo(
+    row: ServerRowUiModel,
+    geoByHost: Map<String, com.v2ray.ang.handler.GeoLookupManager.ServerGeo>,
+): com.v2ray.ang.handler.GeoLookupManager.ServerGeo? {
+    val host = row.profile.server?.trim().takeUnless { it.isNullOrEmpty() } ?: return null
+    return geoByHost[host]
+}
+
 @Composable
 private fun ServerListPage(
     rows: List<ServerRowUiModel>,
@@ -135,6 +147,7 @@ private fun ServerListPage(
     lazyListStates: MutableMap<String, LazyListState>,
     lazyGridStates: MutableMap<String, LazyGridState>,
     actions: ServerRowActions,
+    geoByHost: Map<String, com.v2ray.ang.handler.GeoLookupManager.ServerGeo>,
     onLocateHandled: () -> Unit,
     onMoveServer: (Int, Int) -> Unit,
     contentPadding: PaddingValues
@@ -165,7 +178,8 @@ private fun ServerListPage(
                         row = row,
                         isSelected = row.guid == selectedGuid,
                         doubleColumnDisplay = true,
-                        actions = actions
+                        actions = actions,
+                        geo = rowGeo(row, geoByHost)
                     )
                 }
                 if (canReorder && reorderableGridState != null) {
@@ -215,7 +229,8 @@ private fun ServerListPage(
                             ServerItemRow(
                                 row = row,
                                 isSelected = row.guid == selectedGuid,
-                                actions = actions
+                                actions = actions,
+                                geo = rowGeo(row, geoByHost)
                             )
                         }
                         ItemDivider()
@@ -224,7 +239,8 @@ private fun ServerListPage(
                     ServerItemRow(
                         row = row,
                         isSelected = row.guid == selectedGuid,
-                        actions = actions
+                        actions = actions,
+                        geo = rowGeo(row, geoByHost)
                     )
                     ItemDivider()
                 }
@@ -269,13 +285,15 @@ private fun LocateTargetEffect(
 private fun ServerItemRow(
     row: ServerRowUiModel,
     isSelected: Boolean,
-    actions: ServerRowActions
+    actions: ServerRowActions,
+    geo: com.v2ray.ang.handler.GeoLookupManager.ServerGeo?,
 ) {
     ServerListItem(
         row = row,
         isSelected = isSelected,
         doubleColumnDisplay = false,
-        actions = actions
+        actions = actions,
+        geo = geo
     )
 }
 
@@ -284,14 +302,16 @@ private fun ServerItemColumn(
     row: ServerRowUiModel,
     isSelected: Boolean,
     doubleColumnDisplay: Boolean,
-    actions: ServerRowActions
+    actions: ServerRowActions,
+    geo: com.v2ray.ang.handler.GeoLookupManager.ServerGeo?,
 ) {
     Column {
         ServerListItem(
             row = row,
             isSelected = isSelected,
             doubleColumnDisplay = doubleColumnDisplay,
-            actions = actions
+            actions = actions,
+            geo = geo
         )
         ItemDivider()
     }
@@ -302,7 +322,8 @@ private fun ServerListItem(
     row: ServerRowUiModel,
     isSelected: Boolean,
     doubleColumnDisplay: Boolean,
-    actions: ServerRowActions
+    actions: ServerRowActions,
+    geo: com.v2ray.ang.handler.GeoLookupManager.ServerGeo?,
 ) {
     val testResult = if (row.testDelayMillis == 0L) {
         ""
@@ -351,6 +372,11 @@ private fun ServerListItem(
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(row.remarks, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge.copy(lineBreak = LineBreak.Paragraph), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                // Zero VPN: country flag chip right next to the server name.
+                geo?.countryCode?.let { cc ->
+                    Spacer(Modifier.width(8.dp))
+                    ZeroGeoChip(countryCode = cc)
+                }
                 if (doubleColumnDisplay) {
                     IconButton(onClick = { actions.more(row.guid, row.profile) }, Modifier.size(36.dp)) {
                         Icon(
@@ -405,11 +431,43 @@ private fun ServerListItem(
                 )
             }
             Spacer(modifier = Modifier.height(6.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(row.typeDescription, style = MaterialTheme.typography.bodySmall, color = colorConfigType, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(row.typeDescription, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodySmall, color = colorConfigType, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // Zero VPN: exit IP next to the protocol line.
+                geo?.ipAddress?.let { ip ->
+                    Spacer(Modifier.width(8.dp))
+                    Text(ip, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.weight(1f))
                 Text(testResult, style = MaterialTheme.typography.bodySmall, color = if (row.testDelayMillis < 0L) colorPingRed else colorPing, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Zero VPN: tiny country chip (flag + ISO code) shown next to server names.
+// ---------------------------------------------------------------------------
+@Composable
+private fun ZeroGeoChip(countryCode: String) {
+    val flag = countryCodeToFlagEmoji(countryCode)
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+            .padding(horizontal = 7.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (flag != null) {
+            Text(text = flag, fontSize = 12.sp)
+            Spacer(Modifier.width(3.dp))
+        }
+        Text(
+            text = countryCode.uppercase(),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
     }
 }
 
