@@ -28,88 +28,95 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 private val LightColor = lightColorScheme(
-    primary = Color(0xFF0D9488), // Zero Teal
+    primary = Color(0xFF0084D4), // Neon Blue (readable on light)
     onPrimary = Color(0xFFFFFFFF), // White
-    primaryContainer = Color(0xFFCCFBF1), // Pale Teal
-    onPrimaryContainer = Color(0xFF042F2E), // Deep Teal
-    secondary = Color(0xFF0284C7), // Sky Blue
+    primaryContainer = Color(0xFFCDEBFF), // Pale Neon
+    onPrimaryContainer = Color(0xFF001E30), // Deep Navy
+    secondary = Color(0xFF2A6DF4), // Electric Blue
     onSecondary = Color(0xFFFFFFFF), // White
-    secondaryContainer = Color(0xFFE0F2FE), // Pale Sky
-    onSecondaryContainer = Color(0xFF082F49), // Deep Sky
-    tertiary = Color(0xFF10B981), // Emerald
+    secondaryContainer = Color(0xFFDCE7FF), // Pale Electric
+    onSecondaryContainer = Color(0xFF001945), // Deep Blue
+    tertiary = Color(0xFF00A5C9), // Neon Cyan
     onTertiary = Color(0xFFFFFFFF), // White
-    tertiaryContainer = Color(0xFFA7F3D0), // Pale Emerald
-    onTertiaryContainer = Color(0xFF064E3B), // Dark Emerald
+    tertiaryContainer = Color(0xFFC2F5FF), // Pale Cyan
+    onTertiaryContainer = Color(0xFF003442), // Deep Cyan
     error = Color(0xFFBA1A1A), // Red
     errorContainer = Color(0xFFFFDAD6), // Light Red
     onError = Color(0xFFFFFFFF), // White
     onErrorContainer = Color(0xFF410002), // Dark Red
-    background = Color(0xFFF6F8F9), // Off White
-    onBackground = Color(0xFF191C1D), // Near Black
-    surface = Color(0xFFFFFFFF), // White
-    onSurface = Color(0xFF191C1D), // Near Black
-    surfaceVariant = Color(0xFFECF1F2), // Cool Gray
-    onSurfaceVariant = Color(0xFF40484A), // Dark Gray
-    outline = Color(0xFF70787A), // Medium Gray
-    outlineVariant = Color(0xFFDAE1E2), // Light Gray
-    inverseSurface = Color(0xFF2B3132), // Dark Gray
-    inverseOnSurface = Color(0xFFEDF2F2), // Very Light Gray
-    inversePrimary = Color(0xFF5EEAD4), // Teal Glow
+    background = Color(0xFFF4F7FC), // Ice White
+    onBackground = Color(0xFF171C24), // Near Black
+    surface = Color(0xFFFBFDFF), // White
+    onSurface = Color(0xFF171C24), // Near Black
+    surfaceVariant = Color(0xFFE2E9F4), // Cool Blue Gray
+    onSurfaceVariant = Color(0xFF414A5C), // Dark Gray Blue
+    outline = Color(0xFF71809A), // Medium Gray Blue
+    outlineVariant = Color(0xFFD3DCEA), // Light Gray Blue
+    inverseSurface = Color(0xFF2B3240), // Dark Navy
+    inverseOnSurface = Color(0xFFEDF2FA), // Very Light Blue
+    inversePrimary = Color(0xFF00C8FF), // Neon Glow
     scrim = Color(0xFF000000), // Black
-    surfaceTint = Color(0xFF0D9488), // Zero Teal
+    surfaceTint = Color(0xFF0084D4), // Neon Blue
     surfaceContainerLowest = Color(0xFFFFFFFF), // White
-    surfaceContainerLow = Color(0xFFF6F8F9), // Very Light Gray
-    surfaceContainer = Color(0xFFF0F3F4), // Light Gray
-    surfaceContainerHigh = Color(0xFFEAEDEE), // Light Gray
-    surfaceContainerHighest = Color(0xFFE4E8E9), // Light Gray
+    surfaceContainerLow = Color(0xFFF4F7FC), // Ice White
+    surfaceContainer = Color(0xFFEEF2F9), // Light Blue Gray
+    surfaceContainerHigh = Color(0xFFE8EDF5), // Light Blue Gray
+    surfaceContainerHighest = Color(0xFFE2E8F0), // Light Blue Gray
 )
 
 private val DarkColor = darkColorScheme(
-    primary = Color(0xFF2DD4BF), // Zero Teal Glow
-    onPrimary = Color(0xFF042F2E), // Deep Teal
-    primaryContainer = Color(0xFF0F766E), // Teal Deep
-    onPrimaryContainer = Color(0xFFCCFBF1), // Pale Teal
-    secondary = Color(0xFF38BDF8), // Sky Glow
-    onSecondary = Color(0xFF082F49), // Deep Sky
-    secondaryContainer = Color(0xFF0369A1), // Sky Deep
-    onSecondaryContainer = Color(0xFFE0F2FE), // Pale Sky
-    tertiary = Color(0xFF6EE7B7), // Emerald Glow
-    onTertiary = Color(0xFF064E3B), // Dark Emerald
-    tertiaryContainer = Color(0xFF059669), // Emerald Deep
-    onTertiaryContainer = Color(0xFFA7F3D0), // Pale Emerald
-    error = Color(0xFFFFB4AB), // Light Red
+    primary = Color(0xFF00C8FF), // NEON Blue Glow
+    onPrimary = Color(0xFF00263E), // Deep Navy
+    primaryContainer = Color(0xFF0A4A73), // Neon Deep
+    onPrimaryContainer = Color(0xFFCBEFFF), // Pale Neon
+    secondary = Color(0xFF4D8DFF), // Electric Blue Glow
+    onSecondary = Color(0xFF00264F), // Deep Electric
+    secondaryContainer = Color(0xFF1B4487), // Electric Deep
+    onSecondaryContainer = Color(0xFFD6E3FF), // Pale Electric
+    tertiary = Color(0xFF00E5FF), // Cyan Glow
+    onTertiary = Color(0xFF003444), // Deep Cyan
+    tertiaryContainer = Color(0xFF00718A), // Cyan Deep
+    onTertiaryContainer = Color(0xFFB8F6FF), // Pale Cyan
+    error = Color(0xFFFF5470), // Neon Red
     errorContainer = Color(0xFF93000A), // Dark Red
     onError = Color(0xFF690005), // Deep Red
     onErrorContainer = Color(0xFFFFDAD6), // Light Red
-    background = Color(0xFF101318), // Zero Black
-    onBackground = Color(0xFFE4E8EA), // Light Gray
-    surface = Color(0xFF16191E), // Gooey Surface
-    onSurface = Color(0xFFE4E8EA), // Light Gray
-    surfaceVariant = Color(0xFF232830), // Slate
-    onSurfaceVariant = Color(0xFFC2C9CC), // Gray
-    outline = Color(0xFF8C9498), // Grayish
-    outlineVariant = Color(0xFF3A4148), // Dark Gray
-    inverseSurface = Color(0xFFE4E8EA), // Light Gray
-    inverseOnSurface = Color(0xFF16191E), // Gooey Surface
-    inversePrimary = Color(0xFF0D9488), // Zero Teal
+    background = Color(0xFF05070E), // Zero Black Navy
+    onBackground = Color(0xFFDDE7F5), // Ice Blue White
+    surface = Color(0xFF0A101E), // Deep Navy
+    onSurface = Color(0xFFDDE7F5), // Ice Blue White
+    surfaceVariant = Color(0xFF15223B), // Midnight Blue
+    onSurfaceVariant = Color(0xFFA8BBD6), // Blue Gray
+    outline = Color(0xFF5D7291), // Steel Blue
+    outlineVariant = Color(0xFF273B58), // Dark Steel
+    inverseSurface = Color(0xFFDDE7F5), // Ice Blue White
+    inverseOnSurface = Color(0xFF0A101E), // Deep Navy
+    inversePrimary = Color(0xFF0084D4), // Neon Blue
     scrim = Color(0xFF000000), // Black
-    surfaceTint = Color(0xFF2DD4BF), // Teal Glow
-    surfaceContainerLowest = Color(0xFF0C0F13), // Near Black
-    surfaceContainerLow = Color(0xFF14171C), // Dark
-    surfaceContainer = Color(0xFF191D23), // Dark
-    surfaceContainerHigh = Color(0xFF232830), // Slate
-    surfaceContainerHighest = Color(0xFF2E343C), // Lighter Slate
+    surfaceTint = Color(0xFF00C8FF), // NEON Glow
+    surfaceContainerLowest = Color(0xFF030509), // Void
+    surfaceContainerLow = Color(0xFF0A101E), // Deep Navy
+    surfaceContainer = Color(0xFF0E1526), // Midnight
+    surfaceContainerHigh = Color(0xFF141D33), // Midnight Blue
+    surfaceContainerHighest = Color(0xFF1B2742), // Twilight Blue
 )
 
 // Semantic Colors
-val colorPing = Color(0xFF22C55E) // Green
-val colorPingRed = Color(0xFFEF4444) // Red
-val colorConfigType = Color(0xFF38BDF8) // Sky Blue
-val colorFabActive = Color(0xFF14B8A6) // Zero Teal
-val colorFabInactiveLight = Color(0xFFB8BEC6) // Light Gray
-val colorFabInactiveDark = Color(0xFF3A4048) // Dark Gray
-val dividerColorLight = Color(0xFFE0E0E0) // Light Gray
-val dividerColorDark = Color(0xFF424242) // Dark Gray
+val colorPing = Color(0xFF4ADE80) // Neon Green
+val colorPingRed = Color(0xFFFF5470) // Neon Red
+val colorConfigType = Color(0xFF38BDF8) // Neon Sky
+val colorFabActive = Color(0xFF00C8FF) // NEON Blue
+val colorFabInactiveLight = Color(0xFFB8C4D6) // Light Blue Gray
+val colorFabInactiveDark = Color(0xFF273B58) // Dark Steel
+val dividerColorLight = Color(0xFFE0E8F2) // Light Blue Gray
+val dividerColorDark = Color(0xFF273B58) // Dark Steel
+
+// Zero VPN neon gradient tokens
+val colorNeonCyan = Color(0xFF00E5FF) // Neon Cyan
+val colorNeonBlue = Color(0xFF2979FF) // Electric Blue
+val colorNeonGlow = Color(0xFF00C8FF) // Neon Glow
+val colorDisconnectRed = Color(0xFFFF3D71) // Neon Red
+val colorDisconnectOrange = Color(0xFFFF7A45) // Neon Orange
 
 // Toast Colors 70%
 val toastNormalBgLight = Color(0xB3353A3E) // Dark Gray
@@ -121,8 +128,9 @@ val toastIconCircleBg = Color(0x33FFFFFF) // Semi-transparent White
 val toastTextColor = Color.White // White
 
 object ThemeManager {
+    // Zero VPN ships with the neon-dark look by default ("2" = dark).
     private val _themeMode = MutableStateFlow(
-        MmkvManager.decodeSettingsString(AppConfig.PREF_UI_MODE_NIGHT, "0") ?: "0"
+        MmkvManager.decodeSettingsString(AppConfig.PREF_UI_MODE_NIGHT, "2") ?: "2"
     )
     val themeMode: StateFlow<String> = _themeMode.asStateFlow()
 
@@ -143,7 +151,7 @@ object ThemeManager {
 
     fun refresh() {
         _themeMode.value =
-            MmkvManager.decodeSettingsString(AppConfig.PREF_UI_MODE_NIGHT, "0") ?: "0"
+            MmkvManager.decodeSettingsString(AppConfig.PREF_UI_MODE_NIGHT, "2") ?: "2"
         _dynamicColorEnabled.value =
             MmkvManager.decodeSettingsBool(AppConfig.PREF_DYNAMIC_COLOR, false)
     }

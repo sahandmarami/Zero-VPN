@@ -1,5 +1,8 @@
 package com.v2ray.ang.ui.main
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -9,6 +12,7 @@ import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScaffoldDefaults
@@ -24,9 +28,13 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.v2ray.ang.R
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.handler.CoreUpdateManager
 import com.v2ray.ang.ui.compose.LocalDarkTheme
@@ -148,8 +156,30 @@ fun MainScreen(
             )
         }
     ) {
-        Scaffold(
-            contentWindowInsets = ScaffoldDefaults.contentWindowInsets,
+        // Zero VPN: the neon "base" artwork is the in-app appearance.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            Image(
+                painter = painterResource(R.drawable.base_background),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize()
+            )
+            if (!isDarkTheme) {
+                // Light mode keeps a readable scrim over the artwork.
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(Color.White.copy(alpha = 0.88f))
+                )
+            }
+
+            Scaffold(
+                containerColor = Color.Transparent,
+                contentWindowInsets = ScaffoldDefaults.contentWindowInsets,
             topBar = {
                 MainTopBar(
                     isLoading = isLoading,
@@ -207,7 +237,8 @@ fun MainScreen(
                         status = uiState.status,
                         selectedServerName = selectedServerName,
                         onToggle = { onAction(MainAction.ToggleService) },
-                        onTest = { onAction(MainAction.TestCurrentServer) }
+                        onTest = { onAction(MainAction.TestCurrentServer) },
+                        onTestAll = { onAction(MainAction.TestRealAllServers) }
                     )
                     ZeroUpdateBanners(
                         appUpdateVersion = zeroAppUpdate?.first,
@@ -268,6 +299,7 @@ fun MainScreen(
                     }
                 }
             }
+        }
         }
     }
 }

@@ -46,7 +46,8 @@ fun MainBottomBar(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface)
+                // Zero VPN: translucent surface so the neon base art shows through.
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.78f))
                 .clickable(onClick = { onAction(MainAction.TestCurrentServer) })
                 .windowInsetsPadding(WindowInsets.navigationBars)
         ) {

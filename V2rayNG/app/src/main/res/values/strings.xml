@@ -5,6 +5,8 @@
     <string name="zero_connect">Connect</string>
     <string name="zero_disconnect">Disconnect</string>
     <string name="zero_test_ping">Real ping test</string>
+    <string name="zero_test_all">Test all pings</string>
+    <string name="zero_ping_hint">Tap a test to see ping &amp; country</string>
     <string name="zero_testing">Testing…</string>
     <string name="zero_update_banner">New version %1$s is available</string>
     <string name="zero_core_banner">New Xray core %1$s available (current: %2$s)</string>

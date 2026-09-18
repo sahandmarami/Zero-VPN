@@ -58,7 +58,9 @@ fun GooeyConnectButton(
     containerColor: Color = if (isRunning) colorFabActive
     else if (isDarkTheme) colorFabInactiveDark
     else colorFabInactiveLight,
-    contentColor: Color = Color.White
+    contentColor: Color = if (isRunning) Color(0xFF04121F)
+    else if (isDarkTheme) Color.White
+    else Color(0xFF273B58)
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()

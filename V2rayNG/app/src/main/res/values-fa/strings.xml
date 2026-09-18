@@ -5,6 +5,8 @@
     <string name="zero_connect">اتصال</string>
     <string name="zero_disconnect">قطع اتصال</string>
     <string name="zero_test_ping">تست پینگ واقعی</string>
+    <string name="zero_test_all">تست پینگ همه</string>
+    <string name="zero_ping_hint">برای دیدن پینگ و کشور تست بزنید</string>
     <string name="zero_testing">در حال تست…</string>
     <string name="zero_update_banner">نسخه جدید %1$s در دسترس است</string>
     <string name="zero_core_banner">هسته جدید Xray نسخه %1$s در دسترس است (فعلی: %2$s)</string>
