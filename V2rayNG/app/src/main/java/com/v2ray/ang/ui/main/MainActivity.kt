@@ -56,6 +56,7 @@ import com.v2ray.ang.ui.settings.SettingsActivity
 import com.v2ray.ang.ui.subscription.SubEditActivity
 import com.v2ray.ang.ui.subscription.SubSettingActivity
 import com.v2ray.ang.ui.userasset.UserAssetActivity
+import com.v2ray.ang.util.CrashLogger
 import com.v2ray.ang.util.HttpUtil
 import com.v2ray.ang.dto.UrlContentRequest
 import com.v2ray.ang.util.LogUtil
@@ -194,6 +195,33 @@ class MainActivity : HelperBaseComponentActivity() {
             zeroSplash.value = zeroSplash.value.copy(phase = ZeroSplashPhase.Ready)
             delay(SPLASH_FADE_MILLIS)
             zeroSplash.value = zeroSplash.value.copy(visible = false)
+
+            // Zero VPN: if the previous run ended in an uncaught crash, offer the
+            // report for copying so problems can be diagnosed from user feedback.
+            showCrashReportDialogIfNeeded()
+        }
+    }
+
+    /** Shows the last crash report (if any) with a one-tap copy action. */
+    private fun showCrashReportDialogIfNeeded() {
+        val report = try {
+            CrashLogger.takePendingReport(this)
+        } catch (_: Throwable) {
+            null
+        } ?: return
+
+        try {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.zero_crash_title)
+                .setMessage(report)
+                .setPositiveButton(R.string.zero_crash_copy) { _, _ ->
+                    Utils.setClipboard(this, report)
+                    toast(R.string.toast_success)
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        } catch (e: Exception) {
+            LogUtil.e(AppConfig.TAG, "Failed to show crash report dialog", e)
         }
     }
 

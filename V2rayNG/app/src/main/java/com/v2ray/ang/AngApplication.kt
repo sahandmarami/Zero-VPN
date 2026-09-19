@@ -10,6 +10,7 @@ import com.v2ray.ang.handler.AppLocaleManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.ui.compose.ThemeManager
+import com.v2ray.ang.util.CrashLogger
 
 class AngApplication : Application() {
     companion object {
@@ -34,6 +35,10 @@ class AngApplication : Application() {
      */
     override fun onCreate() {
         super.onCreate()
+
+        // Zero VPN: persist any uncaught exception to a report file so the next
+        // UI launch can offer it for sharing (runs in every process).
+        CrashLogger.install(this)
 
         MmkvManager.initialize(this)
 

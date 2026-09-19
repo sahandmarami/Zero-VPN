@@ -615,4 +615,7 @@
     <string name="zero_subscription_empty_title">No servers from this subscription yet</string>
     <string name="zero_subscription_empty_body">Tap to refresh the subscription and pull the latest servers</string>
 
+    <string name="zero_crash_title">Zero VPN closed unexpectedly last time</string>
+    <string name="zero_crash_copy">Copy report</string>
+
 </resources>

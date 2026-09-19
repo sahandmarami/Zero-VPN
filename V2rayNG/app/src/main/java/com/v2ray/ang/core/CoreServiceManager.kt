@@ -31,6 +31,7 @@ import com.v2ray.ang.service.DialerWebviewService
 import com.v2ray.ang.service.NetworkMonitor
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.Utils
+import com.v2ray.ang.util.JsonUtil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -140,6 +141,11 @@ object CoreServiceManager {
 
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Starting core loop for ${config.remarks}")
 
+        // Zero VPN: reject obviously broken profiles before they reach the core,
+        // so a malformed subscription entry reports a clean failure instead of
+        // surprising the native layer.
+        validateProfile(config)
+
         // Zero VPN: AmneziaWG profiles run through the embedded AmneziaWG
         // engine instead of the Xray core (no obfuscation support there).
         if (WireguardFmt.hasAwgParams(config)) {
@@ -152,6 +158,10 @@ object CoreServiceManager {
         if (!result.status) {
             error(result.errorMessage.ifBlank { "Failed to get V2Ray config" })
         }
+        // Zero VPN: the content handed to the core must at least be a JSON
+        // object with an outbounds array; garbage here could otherwise crash
+        // the process in native code instead of failing gracefully.
+        validateConfigContent(result.content)
 
         currentConfig = config
         var tunFd = vpnInterface?.fd ?: 0
@@ -224,6 +234,49 @@ object CoreServiceManager {
         }
         NotificationManager.startSpeedNotification()
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: AWG engine started successfully")
+    }
+
+    /**
+     * Zero VPN: rejects profiles that cannot possibly start, so the failure is
+     * reported as a normal start failure (toast) instead of reaching the core
+     * with structurally broken data. Throws with a user-readable message.
+     */
+    @Throws(IllegalStateException::class)
+    private fun validateProfile(config: ProfileItem) {
+        // AWG profiles carry their whole configuration in rawConf instead of
+        // the structured fields.
+        if (WireguardFmt.hasAwgParams(config)) {
+            if (config.rawConf.isNullOrBlank()) {
+                error("AmneziaWG configuration text is missing")
+            }
+            return
+        }
+
+        val server = config.server?.trim().orEmpty()
+        if (server.isEmpty()) {
+            error("Server address is missing in the selected profile")
+        }
+
+        val port = config.serverPort?.trim()?.toIntOrNull()
+        if (port == null || port !in 1..65535) {
+            error("Invalid server port in the selected profile")
+        }
+    }
+
+    /**
+     * Zero VPN: verifies the generated runtime config is a JSON object with an
+     * outbounds array before handing it to the native core.
+     */
+    @Throws(IllegalStateException::class)
+    private fun validateConfigContent(content: String) {
+        val root = JsonUtil.parseString(content)
+        if (root == null) {
+            error("Generated configuration is not valid JSON")
+        }
+        val outbounds = root.get("outbounds")?.takeIf { it.isJsonArray }
+        if (outbounds == null) {
+            error("Generated configuration has no outbounds")
+        }
     }
 
     /**
@@ -397,19 +450,31 @@ object CoreServiceManager {
             }
 
             ensureActive()
-            val endpoint = if (time >= 0) SpeedtestManager.getRemoteIPInfo() else null
+            // Zero VPN: the endpoint lookup and the UI message must never throw
+            // out of this coroutine — an unhandled failure here would kill the
+            // whole daemon process with a system crash dialog.
+            val endpoint = try {
+                if (time >= 0) SpeedtestManager.getRemoteIPInfo() else null
+            } catch (e: Exception) {
+                LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failed to get remote IP info", e)
+                null
+            }
             val result = ConnectionTestResult(
                 delayMillis = time,
                 errorMessage = errorStr,
                 country = endpoint?.country,
                 ipAddress = endpoint?.ipAddress,
             )
-            withContext(Dispatchers.Main.immediate) {
-                if (isRunning()) {
-                    MessageHelper.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_RESULT, result, requestId)
-                } else {
-                    MessageHelper.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_CANCEL, "", requestId)
+            try {
+                withContext(Dispatchers.Main.immediate) {
+                    if (isRunning()) {
+                        MessageHelper.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_RESULT, result, requestId)
+                    } else {
+                        MessageHelper.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_CANCEL, "", requestId)
+                    }
                 }
+            } catch (e: Exception) {
+                LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failed to report delay result", e)
             }
         }.invokeOnCompletion { cause ->
             if (cause is CancellationException) {

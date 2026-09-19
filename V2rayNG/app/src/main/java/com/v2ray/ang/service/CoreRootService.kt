@@ -9,6 +9,7 @@ import com.v2ray.ang.contracts.ServiceControl
 import com.v2ray.ang.core.CoreServiceManager
 import com.v2ray.ang.handler.AppLocaleManager
 import com.v2ray.ang.handler.NotificationManager
+import com.v2ray.ang.helper.MessageHelper
 import com.v2ray.ang.root.RootProxyManager
 import com.v2ray.ang.util.LogUtil
 import kotlinx.coroutines.CoroutineScope
@@ -39,30 +40,49 @@ class CoreRootService : Service(), ServiceControl {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        NotificationManager.ensureForeground()
-        LogUtil.i(AppConfig.TAG, "StartCore-Root: command received")
+        try {
+            NotificationManager.ensureForeground()
+            LogUtil.i(AppConfig.TAG, "StartCore-Root: command received")
 
-        if (CoreServiceManager.isRunning()) {
-            LogUtil.i(AppConfig.TAG, "StartCore-Root: Core is already running")
+            if (CoreServiceManager.isRunning()) {
+                LogUtil.i(AppConfig.TAG, "StartCore-Root: Core is already running")
+                return START_STICKY
+            }
+
+            // Start the in-process core first (this also posts the foreground notification),
+            // then install the root routing off the main thread.
+            if (!CoreServiceManager.startCoreLoop(null)) {
+                LogUtil.e(AppConfig.TAG, "StartCore-Root: core failed to start")
+                stopService()
+                return START_NOT_STICKY
+            }
+
+            setupJob = CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    if (!RootProxyManager.start(this@CoreRootService)) {
+                        LogUtil.e(AppConfig.TAG, "StartCore-Root: failed to start root mode, stopping")
+                        stopService()
+                    }
+                } catch (t: Throwable) {
+                    // Zero VPN: a thrown setup error must not kill the daemon.
+                    LogUtil.e(AppConfig.TAG, "StartCore-Root: root setup error", t)
+                    stopService()
+                }
+            }
+
             return START_STICKY
-        }
-
-        // Start the in-process core first (this also posts the foreground notification),
-        // then install the root routing off the main thread.
-        if (!CoreServiceManager.startCoreLoop(null)) {
-            LogUtil.e(AppConfig.TAG, "StartCore-Root: core failed to start")
-            stopService()
+        } catch (t: Throwable) {
+            // Zero VPN: degrade any unexpected error to a graceful start failure.
+            val message = t.message?.takeUnless { it.isBlank() } ?: t.javaClass.simpleName
+            LogUtil.e(AppConfig.TAG, "StartCore-Root: unexpected error during start: $message", t)
+            runCatching {
+                MessageHelper.sendMsg2UI(this, AppConfig.MSG_STATE_START_FAILURE, message)
+                NotificationManager.cancelNotification()
+            }
+            runCatching { CoreServiceManager.stopCoreLoop() }
+            stopSelf()
             return START_NOT_STICKY
         }
-
-        setupJob = CoroutineScope(Dispatchers.IO).launch {
-            if (!RootProxyManager.start(this@CoreRootService)) {
-                LogUtil.e(AppConfig.TAG, "StartCore-Root: failed to start root mode, stopping")
-                stopService()
-            }
-        }
-
-        return START_STICKY
     }
 
     override fun onDestroy() {

@@ -22,6 +22,7 @@ import com.v2ray.ang.handler.AppLocaleManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.NotificationManager
 import com.v2ray.ang.handler.SettingsManager
+import com.v2ray.ang.helper.MessageHelper
 import com.v2ray.ang.root.RootLanSharing
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.Utils
@@ -76,6 +77,26 @@ class CoreVpnService : VpnService(), ServiceControl {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        try {
+            return doStartCommand(intent, flags, startId)
+        } catch (t: Throwable) {
+            // Zero VPN: never let a bad profile or an unexpected error kill the
+            // daemon process with a system crash dialog — degrade to a normal
+            // "start failed" that the UI reports gracefully.
+            val message = t.message?.takeUnless { it.isBlank() } ?: t.javaClass.simpleName
+            LogUtil.e(AppConfig.TAG, "StartCore-VPN: unexpected error during start: $message", t)
+            runCatching {
+                MessageHelper.sendMsg2UI(this, AppConfig.MSG_STATE_START_FAILURE, message)
+                NotificationManager.cancelNotification()
+            }
+            runCatching { stopAllService() }
+            unlockStart()
+            stopSelf()
+            return START_NOT_STICKY
+        }
+    }
+
+    private fun doStartCommand(intent: Intent?, flags: Int, startId: Int = 0): Int {
         NotificationManager.ensureForeground()
         // Always-on VPN restarts from OS deliver intent.action == SERVICE_INTERFACE or null intent.
         // Reset any stuck start lock left by a killed process to allow setupVpnService() to run.

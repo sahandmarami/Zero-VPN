@@ -615,4 +615,7 @@
     <string name="zero_subscription_empty_title">هنوز هیچ سروری از این اشتراک دریافت نشد</string>
     <string name="zero_subscription_empty_body">برای دریافت سرورها بزنید تا اشتراک به‌روزرسانی شود</string>
 
+    <string name="zero_crash_title">زیرو وی‌پی‌ان بار قبل به‌طور غیرمنتظره بسته شد</string>
+    <string name="zero_crash_copy">کپی گزارش</string>
+
 </resources>

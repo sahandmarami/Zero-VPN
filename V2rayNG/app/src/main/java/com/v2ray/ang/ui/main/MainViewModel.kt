@@ -231,8 +231,15 @@ class MainViewModel(
                 updateRunningState(true)
             }
 
-            MainServiceEvent.StateStartFailure -> {
-                toastError(R.string.toast_services_failure)
+            is MainServiceEvent.StateStartFailure -> {
+                // Zero VPN: prefer the concrete reason sent by the core side so
+                // broken profiles from subscriptions are diagnosable by the user.
+                val detail = event.detail?.takeIf { it.isNotBlank() }
+                if (detail != null) {
+                    toastError(detail)
+                } else {
+                    toastError(R.string.toast_services_failure)
+                }
                 updateRunningState(false)
             }
 
