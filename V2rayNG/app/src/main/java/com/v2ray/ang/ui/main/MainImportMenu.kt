@@ -11,6 +11,7 @@ import com.v2ray.ang.ui.compose.AppDropdownMenuItems
 import com.v2ray.ang.ui.compose.SelectListDialog
 
 private enum class ImportMenuAction(@StringRes val labelRes: Int, val action: MainAction) {
+    UpdateSubscriptions(R.string.title_sub_update, MainAction.UpdateSubscriptions),
     Subscription(R.string.zero_menu_add_subscription, MainAction.ImportSubscription),
     QRCode(R.string.menu_item_import_config_qrcode, MainAction.ImportQRcode),
     Clipboard(R.string.menu_item_import_config_clipboard, MainAction.ImportClipboard),
@@ -25,19 +26,6 @@ private enum class ImportMenuAction(@StringRes val labelRes: Int, val action: Ma
     Trojan(R.string.menu_item_import_config_manually_trojan, MainAction.ImportManually(EConfigType.TROJAN.value)),
     WireGuard(R.string.menu_item_import_config_manually_wireguard, MainAction.ImportManually(EConfigType.WIREGUARD.value)),
     Hysteria2(R.string.menu_item_import_config_manually_hysteria2, MainAction.ImportManually(EConfigType.HYSTERIA2.value))
-}
-
-enum class MainMoreMenuAction(@StringRes val labelRes: Int) {
-    RestartService(R.string.title_service_restart),
-    DeleteAll(R.string.title_del_all_config),
-    DeleteDuplicate(R.string.title_del_duplicate_config),
-    DeleteInvalid(R.string.title_del_invalid_config),
-    ExportAll(R.string.title_export_all),
-    LocateSelected(R.string.title_locate_selected_config),
-    SortByTestResults(R.string.title_sort_by_test_results),
-    TestAll(R.string.title_ping_all_server),
-    TestAllRealPing(R.string.title_real_ping_all_server),
-    UpdateSubscriptions(R.string.title_sub_update)
 }
 
 internal enum class ServerMenuAction(
@@ -64,13 +52,6 @@ fun ImportMenuContent(onAction: (MainAction) -> Unit) = AppDropdownMenuItems(
     items = ImportMenuAction.entries,
     labelRes = { it.labelRes },
     onSelected = { onAction(it.action) }
-)
-
-@Composable
-fun MoreMenuContent(onSelected: (MainMoreMenuAction) -> Unit) = AppDropdownMenuItems(
-    items = MainMoreMenuAction.entries,
-    labelRes = { it.labelRes },
-    onSelected = onSelected
 )
 
 @Composable

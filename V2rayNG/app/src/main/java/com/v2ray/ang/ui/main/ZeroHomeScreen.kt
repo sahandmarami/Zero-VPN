@@ -191,12 +191,11 @@ private fun zeroHomeColors(): ZeroHomeColors {
 }
 
 // ---------------------------------------------------------------------------
-// Home top bar: drawer menu, brand, settings gear.
-// ---------------------------------------------------------------------------
+// Home top bar: drawer menu + brand. (The settings gear was removed —
+// settings stays reachable through the bottom tab.)
 @Composable
 fun ZeroHomeTopBar(
     onMenuClick: () -> Unit,
-    onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val hc = zeroHomeColors()
@@ -229,13 +228,6 @@ fun ZeroHomeTopBar(
             fontWeight = FontWeight.Bold
         )
         Spacer(Modifier.weight(1f))
-        IconButton(onClick = onSettingsClick) {
-            Icon(
-                painter = painterResource(R.drawable.ic_settings_24dp),
-                contentDescription = stringResource(R.string.zero_tab_settings),
-                tint = hc.textPrimary
-            )
-        }
     }
 }
 
