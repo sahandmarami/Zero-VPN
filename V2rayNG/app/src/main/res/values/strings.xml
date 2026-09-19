@@ -13,6 +13,7 @@
     <string name="zero_dismiss">Dismiss</string>
     <string name="zero_protected">PROTECTED</string>
     <string name="zero_unprotected">UNPROTECTED</string>
+    <string name="zero_connecting">CONNECTING…</string>
     <string name="zero_jitter">JITTER</string>
     <string name="zero_loss">LOSS</string>
     <string name="zero_uptime">UPTIME</string>

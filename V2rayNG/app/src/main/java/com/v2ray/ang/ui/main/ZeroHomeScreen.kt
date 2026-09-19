@@ -1,6 +1,7 @@
 package com.v2ray.ang.ui.main
 
 import android.os.Build
+import androidx.compose.animation.core.EaseInOutCubic
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -288,6 +289,36 @@ fun ZeroHomeScreen(
     val connected = isRunning
     val hc = zeroHomeColors()
 
+    // --- Connecting phase --------------------------------------------------
+    // From the tap on the power button until the tunnel is actually up the
+    // service gives no signal, so the UI owns the state: a colored comet arc
+    // spins around the button and the status word reads "connecting". It is
+    // cleared the moment isRunning flips true, and self-expires so a failed
+    // or cancelled start (e.g. VPN permission dismissed) cannot stick.
+    var isConnecting by remember { mutableStateOf(false) }
+    LaunchedEffect(connected) {
+        if (connected) isConnecting = false
+    }
+    LaunchedEffect(isConnecting) {
+        if (isConnecting) {
+            delay(15000)
+            isConnecting = false
+        }
+    }
+    val handleToggle: () -> Unit = {
+        when {
+            connected -> {
+                isConnecting = false
+                onToggle()
+            }
+            isConnecting -> Unit // start already in flight — swallow double taps
+            else -> {
+                isConnecting = true
+                onToggle()
+            }
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -299,11 +330,13 @@ fun ZeroHomeScreen(
         // --- Status word -------------------------------------------------
         val statusLabel = when {
             isTesting -> stringResource(R.string.zero_testing)
+            isConnecting -> stringResource(R.string.zero_connecting)
             connected -> stringResource(R.string.zero_protected)
             else -> stringResource(R.string.zero_unprotected)
         }
         val statusColor = when {
             isTesting -> colorZeroTesting
+            isConnecting -> colorZeroNeon
             connected -> hc.accent
             else -> hc.textSecondary
         }
@@ -322,7 +355,8 @@ fun ZeroHomeScreen(
         ZeroConnectButton(
             isRunning = isRunning,
             isTesting = isTesting,
-            onClick = onToggle
+            isConnecting = isConnecting,
+            onClick = handleToggle
         )
 
         Spacer(Modifier.height(12.dp))
@@ -467,7 +501,8 @@ fun ZeroHomeScreen(
 // ambient neon glow → deep glass disc (neon gradient when active, navy +
 // ring when idle) → inner rim shading → glossy top highlight → power icon.
 // Radar rings pulse while connected; an amber sweep arc spins while testing;
-// press gives a liquid squish (bouncy spring).
+// a neon comet arc chases around the rim while connecting; press gives a
+// liquid squish (bouncy spring).
 // ---------------------------------------------------------------------------
 private const val CONNECT_SIZE_DP = 208
 private const val DISC_RADIUS_DP = 88
@@ -476,6 +511,7 @@ private const val DISC_RADIUS_DP = 88
 fun ZeroConnectButton(
     isRunning: Boolean,
     isTesting: Boolean,
+    isConnecting: Boolean = false,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -516,6 +552,25 @@ fun ZeroConnectButton(
         ),
         label = "connectBreathe"
     )
+    // Connecting comet: fast rotation + breathing sweep length.
+    val connectSpin by pulse.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "connectingSpin"
+    )
+    val connectSweepT by pulse.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 750, easing = EaseInOutCubic),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "connectingSweep"
+    )
 
     Box(
         modifier = modifier
@@ -539,9 +594,14 @@ fun ZeroConnectButton(
             val r = DISC_RADIUS_DP.dp.toPx()
 
             // Ambient glow behind the disc
-            val glowColor = if (isTesting) colorZeroTesting else colorZeroNeon
+            val glowColor = when {
+                isTesting -> colorZeroTesting
+                isConnecting -> colorZeroNeonSoft
+                else -> colorZeroNeon
+            }
             val glowAlpha = when {
                 isTesting -> 0.26f + 0.08f * sin(breatheT)
+                isConnecting -> 0.22f + 0.10f * sin(breatheT)
                 isRunning -> 0.30f + 0.06f * sin(breatheT)
                 else -> 0.16f
             }
@@ -580,6 +640,40 @@ fun ZeroConnectButton(
                     topLeft = Offset(c.x - arcR, c.y - arcR),
                     size = Size(arcR * 2f, arcR * 2f),
                     style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round)
+                )
+            }
+
+            // Connecting comet arc — a neon comet chases around the rim
+            // while the tunnel is being established (like the classic VPN
+            // spinner, in Zero blue). Head bright, tail fading out.
+            if (isConnecting && !isTesting) {
+                val arcR = r + 8.dp.toPx()
+                val sweep = 50f + 170f * connectSweepT
+                val brush = Brush.sweepGradient(
+                    0.00f to colorZeroNeonSoft.copy(alpha = 0.0f),
+                    0.45f to colorZeroNeonSoft.copy(alpha = 0.55f),
+                    0.80f to colorZeroNeon,
+                    1.00f to Color(0xFF0084D4),
+                    center = c
+                )
+                drawArc(
+                    brush = brush,
+                    startAngle = connectSpin,
+                    sweepAngle = sweep,
+                    useCenter = false,
+                    topLeft = Offset(c.x - arcR, c.y - arcR),
+                    size = Size(arcR * 2f, arcR * 2f),
+                    style = Stroke(width = 4.6.dp.toPx(), cap = StrokeCap.Round)
+                )
+                // Bright head dot leading the comet
+                val headRad = Math.toRadians((connectSpin + sweep).toDouble())
+                drawCircle(
+                    color = Color(0xFF4ED8FF),
+                    radius = 3.4.dp.toPx(),
+                    center = Offset(
+                        c.x + arcR * kotlin.math.cos(headRad).toFloat(),
+                        c.y + arcR * kotlin.math.sin(headRad).toFloat()
+                    )
                 )
             }
         }
