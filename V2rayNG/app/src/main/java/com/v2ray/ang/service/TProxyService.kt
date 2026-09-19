@@ -19,6 +19,44 @@ class TProxyService(
     private val restartCallback: () -> Unit
 ) : Tun2SocksControl {
     companion object {
+        private const val NATIVE_LIB_NAME = "hev-socks5-tunnel"
+
+        @Volatile
+        private var nativeLoadChecked = false
+
+        @Volatile
+        private var nativeLoadOk = false
+
+        /**
+         * Zero VPN: lazily probes for the native tunnel library instead of
+         * loading it inside the companion initializer. A missing or
+         * incompatible .so used to throw UnsatisfiedLinkError out of class
+         * initialization (crash dialog / NoClassDefFoundError on the next
+         * touch). Now the failure is remembered and reported so callers can
+         * fall back to the Xray built-in TUN engine gracefully.
+         */
+        @JvmStatic
+        fun isNativeLibraryAvailable(): Boolean {
+            if (!nativeLoadChecked) {
+                synchronized(this) {
+                    if (!nativeLoadChecked) {
+                        nativeLoadOk = try {
+                            System.loadLibrary(NATIVE_LIB_NAME)
+                            true
+                        } catch (t: Throwable) {
+                            LogUtil.e(
+                                AppConfig.TAG,
+                                "HevSocks5Tunnel: native library '$NATIVE_LIB_NAME' unavailable: ${t.message}"
+                            )
+                            false
+                        }
+                        nativeLoadChecked = true
+                    }
+                }
+            }
+            return nativeLoadOk
+        }
+
         @JvmStatic
         @Suppress("FunctionName")
         private external fun TProxyStartService(configPath: String, fd: Int): Boolean
@@ -34,10 +72,6 @@ class TProxyService(
         @JvmStatic
         @Suppress("FunctionName")
         private external fun TProxyGetStats(): LongArray?
-
-        init {
-            System.loadLibrary("hev-socks5-tunnel")
-        }
     }
 
     /**
@@ -45,6 +79,14 @@ class TProxyService(
      */
     override fun startTun2Socks() {
 //        LogUtil.i(AppConfig.TAG, "Starting HevSocks5Tunnel via JNI")
+
+        // Zero VPN: never touch the JNI entry points when the native library
+        // is missing — that would raise UnsatisfiedLinkError inside the VPN
+        // service and tear the whole tunnel down.
+        if (!isNativeLibraryAvailable()) {
+            LogUtil.e(AppConfig.TAG, "HevSocks5Tunnel: start skipped, native library unavailable")
+            return
+        }
 
         val configContent = buildConfig()
         val configFile = File(context.filesDir, "hev-socks5-tunnel.yaml").apply {
@@ -105,6 +147,9 @@ class TProxyService(
      * Stops the tun2socks process
      */
     override fun stopTun2Socks() {
+        // Zero VPN: if the library never loaded, the JNI call would throw
+        // UnsatisfiedLinkError — treat stop as a no-op instead.
+        if (!isNativeLibraryAvailable()) return
         try {
             LogUtil.i(AppConfig.TAG, "TProxyStopService...")
             TProxyStopService()

@@ -28,6 +28,7 @@ import com.v2ray.ang.handler.MmkvManager.removeSubscription
 import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.Utils
+import com.v2ray.ang.service.TProxyService
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.random.Random
@@ -408,10 +409,17 @@ object SettingsManager {
 
     /**
      * Check if HEV TUN is being used.
+     * Zero VPN: the HEV engine is only eligible when its native library is
+     * actually packaged and loadable. If libhev-socks5-tunnel.so is missing
+     * (e.g. a bad build), this returns false and every consumer — config
+     * generation, TUN fd hand-over, routing rules and tun2socks selection —
+     * consistently falls back to the Xray built-in TUN inbound instead of
+     * crashing the VPN service with UnsatisfiedLinkError.
      * @return True if HEV TUN is used, false otherwise.
      */
     fun isUsingHevTun(): Boolean {
-        return MmkvManager.decodeSettingsBool(AppConfig.PREF_USE_HEV_TUNNEL, true)
+        return MmkvManager.decodeSettingsBool(AppConfig.PREF_USE_HEV_TUNNEL, true) &&
+            TProxyService.isNativeLibraryAvailable()
     }
 
     /**

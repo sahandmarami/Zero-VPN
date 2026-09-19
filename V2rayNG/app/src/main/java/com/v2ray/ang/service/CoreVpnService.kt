@@ -386,18 +386,31 @@ class CoreVpnService : VpnService(), ServiceControl {
      * Starts the tun2socks process with the appropriate parameters.
      */
     private fun runTun2socks() {
-        if (SettingsManager.isUsingHevTun()) {
-            tun2SocksService = TProxyService(
-                context = applicationContext,
-                vpnInterface = mInterface,
-                isRunningProvider = { isRunning },
-                restartCallback = { runTun2socks() }
-            )
-        } else {
-            tun2SocksService = null
+        // Zero VPN: engine selection must never throw. TProxyService creation
+        // and start are guarded so any unexpected failure degrades to the
+        // Xray built-in TUN path (tun2SocksService == null) instead of
+        // crashing the VPN service.
+        tun2SocksService = try {
+            if (SettingsManager.isUsingHevTun()) {
+                TProxyService(
+                    context = applicationContext,
+                    vpnInterface = mInterface,
+                    isRunningProvider = { isRunning },
+                    restartCallback = { runTun2socks() }
+                )
+            } else {
+                null
+            }
+        } catch (t: Throwable) {
+            LogUtil.e(AppConfig.TAG, "StartCore-VPN: failed to create tun2socks engine", t)
+            null
         }
 
-        tun2SocksService?.startTun2Socks()
+        try {
+            tun2SocksService?.startTun2Socks()
+        } catch (t: Throwable) {
+            LogUtil.e(AppConfig.TAG, "StartCore-VPN: tun2socks start failed", t)
+        }
     }
 
     private fun stopAllService(isForced: Boolean = true) {
