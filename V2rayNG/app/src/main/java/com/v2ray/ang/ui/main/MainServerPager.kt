@@ -570,15 +570,10 @@ private fun ServerListItem(
                     Spacer(Modifier.width(8.dp))
                     ZeroGeoChip(countryCode = cc)
                 }
-                if (doubleColumnDisplay) {
-                    IconButton(onClick = { actions.more(row.guid, row.profile) }, Modifier.size(36.dp)) {
-                        Icon(
-                            painterResource(R.drawable.ic_more_vert_24dp),
-                            stringResource(R.string.acc_more),
-                            Modifier.size(24.dp)
-                        )
-                    }
-                } else {
+                // Zero VPN: the per-row three-dot menu was removed (user request) —
+                // grid cells are clean cards now. Server share/edit/delete stay
+                // available in single-column mode.
+                if (!doubleColumnDisplay) {
                     IconButton(onClick = { actions.share(row.guid, row.profile) }, Modifier.size(36.dp)) {
                         Icon(
                             painterResource(R.drawable.ic_share_24dp),

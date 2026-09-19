@@ -24,7 +24,15 @@ data class ProfileRec(
 )
 
 @Serializable
-data class SubRec(val url: String, val name: String, val lastFetch: Long = 0)
+data class SubRec(
+    val url: String,
+    val name: String,
+    val lastFetch: Long = 0,
+    // subscription-userinfo: bytes used / total / expire epoch-sec (0 = unknown)
+    val used: Long = 0,
+    val total: Long = 0,
+    val expire: Long = 0,
+)
 
 @Serializable
 data class SettingsRec(val socksPort: Int = 10808, val autoProxy: Boolean = true)
@@ -39,6 +47,45 @@ data class DataFile(
 )
 
 enum class ConnStatus { DISCONNECTED, CONNECTING, CONNECTED }
+
+const val APP_VERSION = "1.5.0"
+
+/**
+ * Session stats measured from real ping tests of the current server —
+ * direct port of the Android app's ZeroStatsTracker so the Windows window
+ * shows the very same JITTER / LOSS / UPTIME pills.
+ */
+object ZeroStatsTracker {
+    var lastPing by mutableStateOf<Long?>(null)
+    var currentPing by mutableStateOf<Long?>(null)
+    var jitterMs by mutableStateOf<Long?>(null)
+    var attempts by mutableStateOf(0)
+    var failures by mutableStateOf(0)
+
+    val lossPercent: Int
+        get() = if (attempts == 0) 0 else (failures * 100 + attempts / 2) / attempts
+
+    /** Record a real-ping outcome for the current server (delay < 0 = failure). */
+    fun record(delayMillis: Long) {
+        attempts++
+        if (delayMillis < 0) {
+            failures++
+            return
+        }
+        lastPing = currentPing
+        currentPing = delayMillis
+        lastPing?.let { prev ->
+            val sample = kotlin.math.abs(delayMillis - prev)
+            jitterMs = (jitterMs?.let { old -> (old * 3 + sample) / 4 } ?: sample)
+                .coerceAtLeast(0)
+        }
+    }
+
+    fun reset() {
+        lastPing = null; currentPing = null; jitterMs = null
+        attempts = 0; failures = 0
+    }
+}
 
 /** Singleton app state, persisted as JSON in the user data directory. */
 object Store {
@@ -58,6 +105,9 @@ object Store {
     var proxyOn by mutableStateOf(false)
     var connectedSince by mutableStateOf<Long?>(null)
     var toast by mutableStateOf<String?>(null)
+    var testing by mutableStateOf(false)   // a real-ping test is in flight
+    var drawerOpen by mutableStateOf(false) // home hamburger side drawer
+    var pendingAddSub by mutableStateOf(false) // drawer asked for the add-sub dialog
 
     val pingMap = mutableStateMapOf<String, Long>()
 
@@ -75,6 +125,12 @@ object Store {
 
     val selectedProfile: ProfileRec?
         get() = profiles.firstOrNull { it.id == selectedId }
+
+    /** Quota of the subscription the selected profile belongs to (null = none). */
+    val selectedQuota: Pair<Long, Long>?
+        get() = selectedProfile?.sub?.let { url ->
+            subscriptions.firstOrNull { it.url == url }
+        }?.takeIf { it.total > 0 }?.let { it.used to it.total }
 
     // --- Paths -------------------------------------------------------------
     val isWindows: Boolean =
@@ -191,4 +247,15 @@ object Store {
             if (id == selectedId) ping = ms
         }
     }
+}
+
+/** Human readable byte count, matching the Android traffic formatting. */
+fun trafficString(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val units = listOf("B", "KB", "MB", "GB", "TB", "PB")
+    var v = bytes.toDouble()
+    var i = 0
+    while (v >= 1024.0 && i < units.size - 1) { v /= 1024.0; i++ }
+    return if (i == 0) "${bytes} B"
+    else String.format("%.1f %s", v, units[i])
 }

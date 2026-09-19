@@ -472,11 +472,80 @@ object PingTest {
         con.connectTimeout = timeoutMs
         con.readTimeout = timeoutMs
         con.instanceFollowRedirects = false
-        con.setRequestProperty("User-Agent", "ZeroVPN/1.4.9")
+        con.setRequestProperty("User-Agent", "ZeroVPN/$APP_VERSION")
         val code = con.responseCode
         con.disconnect()
         if (code in 200..399) System.currentTimeMillis() - start else -1
     } catch (_: Throwable) {
         -1
+    }
+
+    /** Direct TCP handshake to the server (used by "test all pings" while offline). */
+    fun tcp(host: String, port: Int, timeoutMs: Int = 3000): Long = try {
+        val start = System.currentTimeMillis()
+        Socket().use { s ->
+            s.connect(InetSocketAddress(host, port), timeoutMs)
+        }
+        System.currentTimeMillis() - start
+    } catch (_: Throwable) {
+        -1
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Server address extraction from a share link (host + port for TCP pings)
+// ---------------------------------------------------------------------------
+object ServerInfo {
+
+    fun hostPort(link: String): Pair<String, Int>? = try {
+        when {
+            link.startsWith("vmess://") -> vmessAddr(link)
+            link.startsWith("vless://") || link.startsWith("trojan://") ->
+                Regex("://[^@/]+@([^:/?#]+):(\\d+)").find(link)?.let {
+                    (it.groupValues[1] to (it.groupValues[2].toIntOrNull() ?: 443))
+                }
+            link.startsWith("ss://") -> ssAddr(link)
+            else -> null
+        }
+    } catch (_: Throwable) {
+        null
+    }
+
+    private fun decodeB64(s: String): String? {
+        val clean = s.replace(Regex("\\s+"), "")
+        return try {
+            String(java.util.Base64.getUrlDecoder().decode(clean + "=".repeat((4 - clean.length % 4) % 4)), Charsets.UTF_8)
+        } catch (_: Throwable) {
+            try {
+                String(java.util.Base64.getDecoder().decode(clean + "=".repeat((4 - clean.length % 4) % 4)), Charsets.UTF_8)
+            } catch (_: Throwable) {
+                null
+            }
+        }
+    }
+
+    private fun vmessAddr(link: String): Pair<String, Int>? {
+        val body = decodeB64(link.removePrefix("vmess://")) ?: return null
+        val j = Json.parseToJsonElement(body).let { it as? JsonObject } ?: return null
+        fun s(k: String) = j[k]?.toString()?.trim('"') ?: ""
+        val host = s("add")
+        val port = s("port").toIntOrNull() ?: 443
+        return if (host.isNotBlank()) host to port else null
+    }
+
+    private fun ssAddr(link: String): Pair<String, Int>? {
+        val main = link.removePrefix("ss://").substringBefore('#')
+        val atIdx = main.lastIndexOf('@')
+        return if (atIdx > 0) {
+            val server = main.substring(atIdx + 1).substringBefore('?')
+            val host = server.substringBeforeLast(':')
+            val port = server.substringAfterLast(':').toIntOrNull() ?: 443
+            if (host.isNotBlank()) host to port else null
+        } else {
+            val decoded = decodeB64(main) ?: return null
+            Regex("^(.+?):(.+)@(.+):(\\d+)$").find(decoded)?.let {
+                (it.groupValues[3] to (it.groupValues[4].toIntOrNull() ?: 443))
+            }
+        }
     }
 }

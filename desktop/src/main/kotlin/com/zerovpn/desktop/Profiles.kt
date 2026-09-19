@@ -58,7 +58,8 @@ object Profiles {
     }
 
     // --- Network ------------------------------------------------------------
-    fun fetch(url: String, timeoutMs: Int = 15000): String {
+    /** Fetch a URL body; also returns the subscription-userinfo header if present. */
+    fun fetchWithInfo(url: String, timeoutMs: Int = 15000): Pair<String, SubRec?> {
         val con = URL(url).openConnection() as HttpURLConnection
         con.connectTimeout = timeoutMs
         con.readTimeout = timeoutMs
@@ -67,8 +68,30 @@ object Profiles {
         con.setRequestProperty("Accept", "*/*")
         val code = con.responseCode
         if (code !in 200..299) throw RuntimeException("HTTP $code")
-        return con.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+        val body = con.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+        var info: SubRec? = null
+        try {
+            val raw = con.headerFields.entries
+                .firstOrNull { it.key?.equals("subscription-userinfo", true) == true }
+                ?.value?.joinToString(";")
+            if (!raw.isNullOrBlank()) {
+                val map = raw.split(";").mapNotNull {
+                    val p = it.split(":", limit = 2)
+                    if (p.size == 2) p[0].trim().lowercase() to p[1].trim().toLongOrNull() else null
+                }.toMap()
+                info = SubRec(
+                    url = url,
+                    name = "",
+                    used = (map["upload"] ?: 0) + (map["download"] ?: 0),
+                    total = map["total"] ?: 0,
+                    expire = map["expire"] ?: 0,
+                )
+            }
+        } catch (_: Throwable) { }
+        return body to info
     }
+
+    fun fetch(url: String, timeoutMs: Int = 15000): String = fetchWithInfo(url, timeoutMs).first
 
     // --- High level operations ----------------------------------------------
     fun updateSubscriptions(): Pair<Int, String> {
@@ -79,7 +102,8 @@ object Profiles {
         for (sub in subs) {
             try {
                 Store.busyMsg = "در حال دریافت: ${sub.name}"
-                val links = parseBody(fetch(sub.url))
+                val (body, info) = fetchWithInfo(sub.url)
+                val links = parseBody(body)
                 val fresh = links.map { p ->
                     ProfileRec(
                         id = stableId(p.link),
@@ -94,7 +118,14 @@ object Profiles {
                     Store.data = Store.data.copy(profiles = customs + fresh)
                     Store.data = Store.data.copy(
                         subscriptions = Store.subscriptions.map {
-                            if (it.url == sub.url) it.copy(lastFetch = System.currentTimeMillis()) else it
+                            if (it.url == sub.url)
+                                it.copy(
+                                    lastFetch = System.currentTimeMillis(),
+                                    used = info?.used ?: it.used,
+                                    total = info?.total ?: it.total,
+                                    expire = info?.expire ?: it.expire,
+                                )
+                            else it
                         }
                     )
                     if (Store.selectedId == null && fresh.isNotEmpty()) {
