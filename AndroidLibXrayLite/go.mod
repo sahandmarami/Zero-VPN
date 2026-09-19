@@ -11,6 +11,7 @@ require (
 )
 
 require (
+	github.com/amnezia-vpn/amneziawg-go v1.0.4 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/cloudflare/circl v1.6.5 // indirect
 	github.com/ghodss/yaml v1.0.1-0.20220118164431-d8423dcdf344 // indirect
@@ -63,4 +64,4 @@ require (
 	lukechampine.com/blake3 v1.4.1 // indirect
 )
 
-replace github.com/amnezia-vpn/amneziawg-go/v3 => ../amneziawg-go
+replace github.com/amnezia-vpn/amneziawg-go/v3 => ./amneziawg-go

@@ -612,5 +612,7 @@
     <string name="zero_subscription_expired">Subscription expired</string>
     <string name="zero_subscription_last_update">Updated: %1$s</string>
     <string name="zero_subscription_delete_confirm">Delete this subscription and all of its servers?</string>
+    <string name="zero_subscription_empty_title">No servers from this subscription yet</string>
+    <string name="zero_subscription_empty_body">Tap to refresh the subscription and pull the latest servers</string>
 
 </resources>

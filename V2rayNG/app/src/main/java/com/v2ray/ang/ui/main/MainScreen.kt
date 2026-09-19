@@ -395,60 +395,68 @@ fun MainScreen(
                         }
                         ZeroBottomTab.LOCATIONS -> {
                             if (groups.isNotEmpty()) {
-                                if (groups.size > 1) {
-                                    GroupTabBar(
-                                        groups = groups,
-                                        selectedTabIndex = pagerState.currentPage.coerceIn(0, groups.lastIndex),
-                                        mainViewModel = mainViewModel,
-                                        onTabClick = { targetIndex ->
-                                            scope.launch {
-                                                pagerState.navigateToPageOptimized(
-                                                    targetPage = targetIndex,
-                                                    animateAdjacentPage = true
-                                                )
+                                // Zero VPN fix (v1.4.5): GroupTabBar and the pager were
+                                // siblings inside AnimatedContent's content lambda, which
+                                // stacks children in a Box — the tab row and the page
+                                // (subscription header card) rendered on top of each other.
+                                // A single group hid the bug because the tab bar wasn't
+                                // emitted at all. Wrap them in a Column to stack properly.
+                                Column(modifier = Modifier.fillMaxSize()) {
+                                    if (groups.size > 1) {
+                                        GroupTabBar(
+                                            groups = groups,
+                                            selectedTabIndex = pagerState.currentPage.coerceIn(0, groups.lastIndex),
+                                            mainViewModel = mainViewModel,
+                                            onTabClick = { targetIndex ->
+                                                scope.launch {
+                                                    pagerState.navigateToPageOptimized(
+                                                        targetPage = targetIndex,
+                                                        animateAdjacentPage = true
+                                                    )
+                                                }
                                             }
-                                        }
-                                    )
-                                }
+                                        )
+                                    }
 
-                                HorizontalPager(
-                                    state = pagerState,
-                                    modifier = Modifier.fillMaxSize(),
-                                    userScrollEnabled = true,
-                                    beyondViewportPageCount = 1,
-                                    key = { page -> groups.getOrNull(page)?.id ?: "group-page-$page" }
-                                ) { page ->
-                                    val group = groups.getOrNull(page) ?: return@HorizontalPager
+                                    HorizontalPager(
+                                        state = pagerState,
+                                        modifier = Modifier.fillMaxSize(),
+                                        userScrollEnabled = true,
+                                        beyondViewportPageCount = 1,
+                                        key = { page -> groups.getOrNull(page)?.id ?: "group-page-$page" }
+                                    ) { page ->
+                                        val group = groups.getOrNull(page) ?: return@HorizontalPager
 
-                                    GroupPagerPage(
-                                        groupId = group.id,
-                                        mainViewModel = mainViewModel,
-                                        selectedGuid = selectedGuid,
-                                        locateTarget = uiState.locateTarget,
-                                        doubleColumnDisplay = doubleColumnDisplay,
-                                        searchQuery = searchQuery,
-                                        lazyListStates = lazyListStates,
-                                        lazyGridStates = lazyGridStates,
-                                        onSelectServer = { guid -> onAction(MainAction.SelectServer(guid)) },
-                                        onEditServer = { guid, profile -> onAction(MainAction.EditServer(guid, profile)) },
-                                        onShareServer = { guid, profile ->
-                                            shareTarget = Triple(guid, profile, false)
-                                        },
-                                        onMoreServer = { guid, profile ->
-                                            shareTarget = Triple(guid, profile, true)
-                                        },
-                                        onRemoveServer = removeServer,
-                                        contentPadding = PaddingValues(
-                                            start = 0.dp,
-                                            top = 0.dp,
-                                            end = 0.dp,
-                                            bottom = 16.dp
-                                        ),
-                                        subscriptionItem = subscriptionInfo[group.id],
-                                        onUpdateSubscription = { onAction(MainAction.UpdateSubscriptions) },
-                                        onEditSubscription = { onEditSubscription(group.id) },
-                                        onDeleteSubscription = { deleteSubTarget = group.id },
-                                    )
+                                        GroupPagerPage(
+                                            groupId = group.id,
+                                            mainViewModel = mainViewModel,
+                                            selectedGuid = selectedGuid,
+                                            locateTarget = uiState.locateTarget,
+                                            doubleColumnDisplay = doubleColumnDisplay,
+                                            searchQuery = searchQuery,
+                                            lazyListStates = lazyListStates,
+                                            lazyGridStates = lazyGridStates,
+                                            onSelectServer = { guid -> onAction(MainAction.SelectServer(guid)) },
+                                            onEditServer = { guid, profile -> onAction(MainAction.EditServer(guid, profile)) },
+                                            onShareServer = { guid, profile ->
+                                                shareTarget = Triple(guid, profile, false)
+                                            },
+                                            onMoreServer = { guid, profile ->
+                                                shareTarget = Triple(guid, profile, true)
+                                            },
+                                            onRemoveServer = removeServer,
+                                            contentPadding = PaddingValues(
+                                                start = 0.dp,
+                                                top = 0.dp,
+                                                end = 0.dp,
+                                                bottom = 16.dp
+                                            ),
+                                            subscriptionItem = subscriptionInfo[group.id],
+                                            onUpdateSubscription = { onAction(MainAction.UpdateSubscriptions) },
+                                            onEditSubscription = { onEditSubscription(group.id) },
+                                            onDeleteSubscription = { deleteSubTarget = group.id },
+                                        )
+                                    }
                                 }
                             }
                         }
