@@ -11,8 +11,6 @@
     <string name="zero_update_banner">نسخه جدید %1$s در دسترس است</string>
     <string name="zero_core_banner">هسته جدید Xray نسخه %1$s در دسترس است (فعلی: %2$s)</string>
     <string name="zero_dismiss">بستن</string>
-    <string name="zero_protected">محافظت‌شده</string>
-    <string name="zero_unprotected">بدون محافظت</string>
     <string name="zero_connecting">در حال اتصال…</string>
     <string name="zero_jitter">جیتر</string>
     <string name="zero_loss">اتلاف بسته</string>

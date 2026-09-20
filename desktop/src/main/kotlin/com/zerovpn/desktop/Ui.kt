@@ -206,17 +206,24 @@ object Connector {
                 }
                 val fresh = links.map { p ->
                     ProfileRec(
-                        id = Profiles.stableId(p.link),
+                        id = Profiles.subId(url, p.link),
                         name = p.name,
                         proto = p.proto,
                         link = p.link,
                         sub = url,
                     )
-                }
+                }.distinctBy { it.id }
                 synchronized(Store) {
-                    val customs = Store.profiles.filter { it.sub == null }
-                    Store.data = Store.data.copy(profiles = customs + fresh)
-                    if (Store.selectedId == null) Store.data = Store.data.copy(selected = fresh.first().id)
+                    // Replace ONLY this subscription's profiles — other subs
+                    // and manual configs stay untouched (mixing bug fix).
+                    val others = Store.profiles.filter { it.sub != url }
+                    Store.data = Store.data.copy(profiles = others + fresh)
+                    if ((Store.selectedId == null ||
+                            Store.profiles.none { it.id == Store.selectedId }) &&
+                        Store.profiles.isNotEmpty()
+                    ) {
+                        Store.data = Store.data.copy(selected = Store.profiles.first().id)
+                    }
                     Store.save()
                 }
                 Store.busyMsg = null
@@ -439,27 +446,31 @@ fun HomeScreen(modifier: Modifier = Modifier) {
 
         Spacer(Modifier.height(6.dp))
 
-        // --- Status word -------------------------------------------------
-        val statusLabel = when {
-            isTesting -> "در حال تست…"
-            isConnecting -> "در حال اتصال…"
-            connected -> "محافظت‌شده"
-            else -> "بدون محافظت"
+        // --- Status word (only while testing/connecting — the
+        // protected/unprotected wording was removed on request) -------------
+        Box(
+            modifier = Modifier.height(22.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            if (isTesting || isConnecting) {
+                val statusLabel = when {
+                    isTesting -> "در حال تست…"
+                    else -> "در حال اتصال…"
+                }
+                val statusColor = when {
+                    isTesting -> colorZeroTesting
+                    else -> colorZeroNeon
+                }
+                Text(
+                    text = statusLabel,
+                    color = statusColor,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 5.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
         }
-        val statusColor = when {
-            isTesting -> colorZeroTesting
-            isConnecting -> colorZeroNeon
-            connected -> hc.accent
-            else -> hc.textSecondary
-        }
-        Text(
-            text = statusLabel,
-            color = statusColor,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 5.sp,
-            textAlign = TextAlign.Center
-        )
 
         Spacer(Modifier.height(18.dp))
 
@@ -581,12 +592,10 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         val sel = Store.selectedProfile
         val host = sel?.let { ServerInfo.hostPort(it.link)?.first }
         val geo = host?.let { GeoLookup.byHost[it] }
-        val flag = countryCodeToFlagEmoji(geo?.cc)
-        val countryName = localizedCountryName(geo?.cc) ?: geo?.cc
-        val countryLine = listOf(countryName, geo?.ip ?: host).filterNotNull().joinToString("  ·  ")
+        val countryLine = listOf(geo?.ip ?: host).filterNotNull().joinToString("  ·  ")
         ZeroServerCard(
             serverName = sel?.name ?: "هیچ سروری انتخاب نشده",
-            flagEmoji = flag,
+            flagCode = geo?.cc,
             countryLabel = countryLine,
             pingMillis = sel?.let { Store.pingMap[it.id] },
             quota = Store.selectedQuota,
@@ -969,7 +978,7 @@ private fun ZeroServerCard(
     onClick: () -> Unit,
     hc: ZeroHomeColors,
     modifier: Modifier = Modifier,
-    flagEmoji: String? = null,
+    flagCode: String? = null,
 ) {
     val cardShape = RoundedCornerShape(18.dp)
     Row(
@@ -983,11 +992,9 @@ private fun ZeroServerCard(
             .padding(horizontal = 14.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (flagEmoji != null) {
-            Text(
-                text = flagEmoji,
-                fontSize = 26.sp
-            )
+        // Real flag image (Windows has no flag-emoji glyphs) — globe fallback.
+        if (flagCode != null) {
+            ZeroFlag(countryCode = flagCode, width = 34.dp)
         } else {
             Text(
                 text = "🌐",

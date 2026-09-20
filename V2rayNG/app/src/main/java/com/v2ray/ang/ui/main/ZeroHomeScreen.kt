@@ -311,27 +311,31 @@ fun ZeroHomeScreen(
     ) {
         Spacer(Modifier.height(6.dp))
 
-        // --- Status word -------------------------------------------------
-        val statusLabel = when {
-            isTesting -> stringResource(R.string.zero_testing)
-            isConnecting -> stringResource(R.string.zero_connecting)
-            connected -> stringResource(R.string.zero_protected)
-            else -> stringResource(R.string.zero_unprotected)
+        // --- Status word (only while testing/connecting — the
+        // protected/unprotected wording was removed on request) -------------
+        Box(
+            modifier = Modifier.height(22.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            if (isTesting || isConnecting) {
+                val statusLabel = when {
+                    isTesting -> stringResource(R.string.zero_testing)
+                    else -> stringResource(R.string.zero_connecting)
+                }
+                val statusColor = when {
+                    isTesting -> colorZeroTesting
+                    else -> colorZeroNeon
+                }
+                Text(
+                    text = statusLabel,
+                    color = statusColor,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 5.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
         }
-        val statusColor = when {
-            isTesting -> colorZeroTesting
-            isConnecting -> colorZeroNeon
-            connected -> hc.accent
-            else -> hc.textSecondary
-        }
-        Text(
-            text = statusLabel,
-            color = statusColor,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 5.sp,
-            textAlign = TextAlign.Center
-        )
 
         Spacer(Modifier.height(18.dp))
 

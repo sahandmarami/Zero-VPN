@@ -53,7 +53,7 @@ data class DataFile(
 
 enum class ConnStatus { DISCONNECTED, CONNECTING, CONNECTED }
 
-const val APP_VERSION = "1.5.2"
+const val APP_VERSION = "1.5.3"
 
 /**
  * Session stats measured from real ping tests of the current server —
@@ -115,6 +115,8 @@ object Store {
     var drawerOpen by mutableStateOf(false) // servers-screen hamburger side drawer
     /** Selected servers-screen group tab: subscription URL or null = Default. */
     var selectedGroup by mutableStateOf<String?>(null)
+    /** true once the user taps a group tab — keeps the choice across screen switches. */
+    var groupChosenExplicit by mutableStateOf(false)
 
     val pingMap = mutableStateMapOf<String, Long>()
 
@@ -181,6 +183,12 @@ object Store {
             val f = File(dataDir, "data.json")
             if (f.isFile) data = json.decodeFromString(f.readText())
         } catch (_: Throwable) { }
+        // Safety: drop duplicated profile ids (old files could contain the
+        // same link twice) and keep the selection valid.
+        data = data.copy(profiles = data.profiles.distinctBy { it.id })
+        if (profiles.isNotEmpty() && profiles.none { it.id == data.selected }) {
+            data = data.copy(selected = profiles.first().id)
+        }
         data.pings.forEach { (k, v) -> if (v > 0) pingMap[k] = v }
         ThemeState.apply(data.settings.theme == "dark")
         GeoLookup.loadCache()

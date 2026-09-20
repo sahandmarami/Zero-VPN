@@ -11,8 +11,6 @@
     <string name="zero_update_banner">New version %1$s is available</string>
     <string name="zero_core_banner">New Xray core %1$s available (current: %2$s)</string>
     <string name="zero_dismiss">Dismiss</string>
-    <string name="zero_protected">PROTECTED</string>
-    <string name="zero_unprotected">UNPROTECTED</string>
     <string name="zero_connecting">CONNECTING…</string>
     <string name="zero_jitter">JITTER</string>
     <string name="zero_loss">LOSS</string>

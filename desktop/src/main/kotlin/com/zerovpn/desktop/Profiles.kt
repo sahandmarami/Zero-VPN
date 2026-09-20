@@ -106,16 +106,18 @@ object Profiles {
                 val links = parseBody(body)
                 val fresh = links.map { p ->
                     ProfileRec(
-                        id = stableId(p.link),
+                        id = subId(sub.url, p.link),
                         name = p.name,
                         proto = p.proto,
                         link = p.link,
                         sub = sub.url,
                     )
-                }
+                }.distinctBy { it.id }
                 synchronized(Store) {
-                    val customs = Store.profiles.filter { it.sub == null }
-                    Store.data = Store.data.copy(profiles = customs + fresh)
+                    // Replace ONLY this subscription's profiles — every other
+                    // group (subs + manual) stays untouched.
+                    val others = Store.profiles.filter { it.sub != sub.url }
+                    Store.data = Store.data.copy(profiles = others + fresh)
                     Store.data = Store.data.copy(
                         subscriptions = Store.subscriptions.map {
                             if (it.url == sub.url)
@@ -128,8 +130,11 @@ object Profiles {
                             else it
                         }
                     )
-                    if (Store.selectedId == null && fresh.isNotEmpty()) {
-                        Store.data = Store.data.copy(selected = fresh.first().id)
+                    if ((Store.selectedId == null ||
+                            Store.profiles.none { it.id == Store.selectedId }) &&
+                        Store.profiles.isNotEmpty()
+                    ) {
+                        Store.data = Store.data.copy(selected = Store.profiles.first().id)
                     }
                     Store.save()
                 }
@@ -152,13 +157,13 @@ object Profiles {
             val links = parseBody(body)
             val fresh = links.map { p ->
                 ProfileRec(
-                    id = stableId(p.link),
+                    id = subId(sub.url, p.link),
                     name = p.name,
                     proto = p.proto,
                     link = p.link,
                     sub = sub.url,
                 )
-            }
+            }.distinctBy { it.id }
             synchronized(Store) {
                 val others = Store.profiles.filter { it.sub != sub.url }
                 Store.data = Store.data.copy(profiles = others + fresh)
@@ -174,8 +179,11 @@ object Profiles {
                         else it
                     }
                 )
-                if (Store.selectedId == null && fresh.isNotEmpty()) {
-                    Store.data = Store.data.copy(selected = fresh.first().id)
+                if ((Store.selectedId == null ||
+                        Store.profiles.none { it.id == Store.selectedId }) &&
+                    Store.profiles.isNotEmpty()
+                ) {
+                    Store.data = Store.data.copy(selected = Store.profiles.first().id)
                 }
                 Store.save()
             }
@@ -207,6 +215,12 @@ object Profiles {
 
     fun stableId(link: String): String =
         UUID.nameUUIDFromBytes(link.toByteArray(Charsets.UTF_8)).toString()
+
+    /** Unique id per (subscription, link): the same server link inside two
+     *  different subscriptions must be two independent rows, or selection
+     *  and list keys collide ("the app picks a server by itself"). */
+    fun subId(subUrl: String, link: String): String =
+        stableId(subUrl + "|" + link)
 
     /** Read system clipboard text (best effort). */
     fun clipboardText(): String? = try {

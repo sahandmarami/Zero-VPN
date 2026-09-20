@@ -68,11 +68,16 @@ fun LocationsScreen(modifier: Modifier = Modifier) {
     var editSubTarget by remember { mutableStateOf<SubRec?>(null) }
     var deleteSubTarget by remember { mutableStateOf<SubRec?>(null) }
     var showDelAllConfirm by remember { mutableStateOf(false) }
-    var groupChosen by remember { mutableStateOf(false) }
 
     val hc = zeroHomeColors
     val tabs = Store.groupTabs()
-    val activeGroup: String? = if (groupChosen) Store.selectedGroup else tabs.firstOrNull()?.first
+    // If the remembered group no longer exists (sub removed), fall back.
+    if (Store.selectedGroup != null && Store.subscriptionFor(Store.selectedGroup) == null) {
+        Store.selectedGroup = null
+        Store.groupChosenExplicit = false
+    }
+    val activeGroup: String? =
+        if (Store.groupChosenExplicit) Store.selectedGroup else tabs.firstOrNull()?.first
     val sub = Store.subscriptionFor(activeGroup)
     val profiles = Store.profilesForGroup(activeGroup).filter {
         searchQuery.isBlank() || it.name.contains(searchQuery, ignoreCase = true)
@@ -205,7 +210,7 @@ fun LocationsScreen(modifier: Modifier = Modifier) {
                             )
                             .clickable {
                                 Store.selectedGroup = url
-                                groupChosen = true
+                                Store.groupChosenExplicit = true
                             }
                             .padding(horizontal = 14.dp, vertical = 9.dp)
                     ) {
@@ -327,7 +332,7 @@ fun LocationsScreen(modifier: Modifier = Modifier) {
             onConfirm = {
                 Store.removeSubscription(target.url)
                 Store.selectedGroup = null
-                groupChosen = false
+                Store.groupChosenExplicit = false
                 deleteSubTarget = null
                 Store.toast("اشتراک حذف شد")
             }
@@ -343,7 +348,7 @@ fun LocationsScreen(modifier: Modifier = Modifier) {
                 showDelAllConfirm = false
                 Store.clearProfiles()
                 Store.selectedGroup = null
-                groupChosen = false
+                Store.groupChosenExplicit = false
                 Store.toast("همه سرورها حذف شدند")
             }
         )
@@ -600,10 +605,10 @@ private fun ServerRow(
                     overflow = TextOverflow.Ellipsis,
                     color = hc.textPrimary
                 )
-                // Country flag chip right next to the server name (like Android).
+                // Country flag right next to the server name (like Android).
                 val host = remember(profile.id) { ServerInfo.hostPort(profile.link)?.first ?: "" }
                 val geo = GeoLookup.byHost[host]
-                geo?.cc?.let { cc -> ZeroGeoChip(countryCode = cc) }
+                geo?.cc?.let { cc -> ZeroFlag(countryCode = cc, width = 24.dp, showCode = true) }
                 IconButton(onClick = onShare, Modifier.size(36.dp)) {
                     Icon(ZeroIcons.share, "اشتراک لینک", Modifier.size(20.dp), tint = hc.textSecondary)
                 }
@@ -658,31 +663,6 @@ private fun ServerRow(
                 )
             }
         }
-    }
-}
-
-/** Tiny country chip (flag + ISO code) — port of the Android ZeroGeoChip. */
-@Composable
-private fun ZeroGeoChip(countryCode: String) {
-    val hc = zeroHomeColors
-    val flag = countryCodeToFlagEmoji(countryCode)
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(hc.accent.copy(alpha = 0.12f))
-            .padding(horizontal = 7.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (flag != null) {
-            Text(text = flag, fontSize = 12.sp)
-            Spacer(Modifier.width(3.dp))
-        }
-        Text(
-            text = countryCode.uppercase(),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color = hc.accent
-        )
     }
 }
 
