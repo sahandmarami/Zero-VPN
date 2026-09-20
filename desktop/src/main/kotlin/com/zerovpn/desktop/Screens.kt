@@ -569,6 +569,9 @@ private fun ServerRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(androidx.compose.foundation.layout.IntrinsicSize.Min)
+            // Soft accent wash on the chosen row so the selection is obvious
+            // at a glance (the 4 dp side bar alone was too subtle).
+            .background(if (selected) hc.accent.copy(alpha = 0.07f) else Color.Transparent)
             .clickable { onSelect() }
     ) {
         // Selection bar (renders on the leading side, mirrored in RTL — same

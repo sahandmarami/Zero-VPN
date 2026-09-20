@@ -53,7 +53,7 @@ data class DataFile(
 
 enum class ConnStatus { DISCONNECTED, CONNECTING, CONNECTED }
 
-const val APP_VERSION = "1.5.3"
+const val APP_VERSION = "1.5.4"
 
 /**
  * Session stats measured from real ping tests of the current server —
@@ -99,7 +99,11 @@ object Store {
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
     private val prettyJson = Json { ignoreUnknownKeys = true; prettyPrint = true }
 
-    var data = DataFile()
+    // Observable so every screen (selected-row highlight, home card, group
+    // counts…) recomposes the moment ANY data field changes. Previously a
+    // plain var — tapping a server row mutated data silently and the UI
+    // never repainted the selection ("clicking a config does nothing").
+    var data by mutableStateOf(DataFile())
 
     // --- UI state ----------------------------------------------------------
     var view by mutableStateOf("home")            // home | locations | settings

@@ -317,37 +317,39 @@ fun ZeroApp() {
             showAddSubGlobal = true
         }
     }
-    CompositionLocalProvider(
-        LocalLayoutDirection provides LayoutDirection.Rtl,
-        LocalTextStyle provides TextStyle(fontFamily = fontFamilyVazir, color = colorTextPrimary),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .zeroBackgroundGlow()
+    ZeroTheme {
+        CompositionLocalProvider(
+            LocalLayoutDirection provides LayoutDirection.Rtl,
+            LocalTextStyle provides TextStyle(fontFamily = zeroFontFamily, color = colorTextPrimary),
         ) {
-            Column(Modifier.fillMaxSize()) {
-                Box(Modifier.weight(1f)) {
-                    when (Store.view) {
-                        "locations" -> LocationsScreen()
-                        "settings" -> SettingsScreen()
-                        else -> HomeScreen()
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zeroBackgroundGlow()
+            ) {
+                Column(Modifier.fillMaxSize()) {
+                    Box(Modifier.weight(1f)) {
+                        when (Store.view) {
+                            "locations" -> LocationsScreen()
+                            "settings" -> SettingsScreen()
+                            else -> HomeScreen()
+                        }
                     }
+                    ZeroBottomNav()
                 }
-                ZeroBottomNav()
-            }
 
-            // Side drawer (servers-screen hamburger)
-            if (Store.drawerOpen) AppDrawer()
+                // Side drawer (servers-screen hamburger)
+                if (Store.drawerOpen) AppDrawer()
 
-            Store.busyMsg?.let { msg ->
-                BusyBanner(msg, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+                Store.busyMsg?.let { msg ->
+                    BusyBanner(msg, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+                }
+                Store.toast?.let { msg ->
+                    ToastBanner(msg, Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp))
+                }
             }
-            Store.toast?.let { msg ->
-                ToastBanner(msg, Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp))
-            }
+            if (showAddSubGlobal) AddSubDialog(onDismiss = { showAddSubGlobal = false })
         }
-        if (showAddSubGlobal) AddSubDialog(onDismiss = { showAddSubGlobal = false })
     }
 }
 
@@ -466,7 +468,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                     color = statusColor,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = 5.sp,
+                    // No letterSpacing here: letter-spacing breaks Persian joining.
                     textAlign = TextAlign.Center
                 )
             }
@@ -958,7 +960,7 @@ private fun ZeroStatPill(
             text = label,
             color = hc.textSecondary,
             fontSize = 11.sp,
-            letterSpacing = 1.5.sp,
+            // No letterSpacing: it separates the Persian letters.
             fontWeight = FontWeight.SemiBold,
             maxLines = 1
         )

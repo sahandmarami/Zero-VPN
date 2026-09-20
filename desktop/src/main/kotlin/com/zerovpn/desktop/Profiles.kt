@@ -75,8 +75,10 @@ object Profiles {
                 .firstOrNull { it.key?.equals("subscription-userinfo", true) == true }
                 ?.value?.joinToString(";")
             if (!raw.isNullOrBlank()) {
+                // Standard header: "upload=..; download=..; total=..; expire=.."
+                // (same parsing as the Android app — values use '=', not ':').
                 val map = raw.split(";").mapNotNull {
-                    val p = it.split(":", limit = 2)
+                    val p = it.split("=", limit = 2)
                     if (p.size == 2) p[0].trim().lowercase() to p[1].trim().toLongOrNull() else null
                 }.toMap()
                 info = SubRec(
