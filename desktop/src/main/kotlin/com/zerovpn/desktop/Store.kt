@@ -35,7 +35,12 @@ data class SubRec(
 )
 
 @Serializable
-data class SettingsRec(val socksPort: Int = 10808, val autoProxy: Boolean = true)
+data class SettingsRec(
+    val socksPort: Int = 10808,
+    val autoProxy: Boolean = true,
+    // "light" | "dark" — light matches the phone app the user compares against
+    val theme: String = "light",
+)
 
 @Serializable
 data class DataFile(
@@ -48,7 +53,7 @@ data class DataFile(
 
 enum class ConnStatus { DISCONNECTED, CONNECTING, CONNECTED }
 
-const val APP_VERSION = "1.5.1"
+const val APP_VERSION = "1.5.2"
 
 /**
  * Session stats measured from real ping tests of the current server —
@@ -106,8 +111,10 @@ object Store {
     var connectedSince by mutableStateOf<Long?>(null)
     var toast by mutableStateOf<String?>(null)
     var testing by mutableStateOf(false)   // a real-ping test is in flight
-    var drawerOpen by mutableStateOf(false) // home hamburger side drawer
-    var pendingAddSub by mutableStateOf(false) // drawer asked for the add-sub dialog
+    var pendingAddSub by mutableStateOf(false) // menu asked for the add-sub dialog
+    var drawerOpen by mutableStateOf(false) // servers-screen hamburger side drawer
+    /** Selected servers-screen group tab: subscription URL or null = Default. */
+    var selectedGroup by mutableStateOf<String?>(null)
 
     val pingMap = mutableStateMapOf<String, Long>()
 
@@ -175,6 +182,12 @@ object Store {
             if (f.isFile) data = json.decodeFromString(f.readText())
         } catch (_: Throwable) { }
         data.pings.forEach { (k, v) -> if (v > 0) pingMap[k] = v }
+        ThemeState.apply(data.settings.theme == "dark")
+        GeoLookup.loadCache()
+        // Pre-fetch geo (flag + IP) for every server host, like the phone app.
+        profiles.forEach { p ->
+            ServerInfo.hostPort(p.link)?.first?.let { GeoLookup.ensureLookup(it) }
+        }
     }
 
     fun save() {
@@ -201,6 +214,41 @@ object Store {
 
     fun setAutoProxy(v: Boolean) {
         data = data.copy(settings = data.settings.copy(autoProxy = v))
+        save()
+    }
+
+    fun setTheme(dark: Boolean) {
+        data = data.copy(settings = data.settings.copy(theme = if (dark) "dark" else "light"))
+        save()
+        ThemeState.apply(dark)
+    }
+
+    /** Subscription record for a group URL (null = Default group). */
+    fun subscriptionFor(url: String?): SubRec? =
+        if (url == null) null else subscriptions.firstOrNull { it.url == url }
+
+    /** Profiles belonging to a group: null group = manually added ones. */
+    fun profilesForGroup(url: String?): List<ProfileRec> =
+        profiles.filter { it.sub == url }
+
+    /** All group tabs in display order: subscriptions first, Default last. */
+    fun groupTabs(): List<Pair<String?, Int>> {
+        val subs = subscriptions.map { it.url to profiles.count { p -> p.sub == it.url } }
+        val def = null to profiles.count { it.sub == null }
+        return subs + def
+    }
+
+    fun renameProfile(id: String, newName: String) {
+        profiles = profiles.map { if (it.id == id) it.copy(name = newName) else it }
+        save()
+    }
+
+    fun updateSubscription(url: String, name: String) {
+        data = data.copy(
+            subscriptions = subscriptions.map {
+                if (it.url == url) it.copy(name = name) else it
+            }
+        )
         save()
     }
 

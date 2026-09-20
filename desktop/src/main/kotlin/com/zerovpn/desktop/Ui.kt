@@ -243,7 +243,7 @@ object Connector {
 }
 
 // ---------------------------------------------------------------------------
-// Theme-aware home colors — same values as the Android dark palette
+// Theme-aware home colors — follows the app theme (light = the phone look)
 // ---------------------------------------------------------------------------
 data class ZeroHomeColors(
     val textPrimary: Color,
@@ -257,17 +257,21 @@ data class ZeroHomeColors(
     val pingBad: Color,
 )
 
-val zeroHomeColors = ZeroHomeColors(
-    textPrimary = Color.White,
-    textSecondary = Color(0xFF7C8CA6),
-    cardBg = Color(0xFF141A24),
-    cardBorder = Color(0xFF212C3C),
-    pillBg = Color(0xFF12171F),
-    accent = colorZeroNeonSoft,
-    pingGood = colorZeroNeonSoft,
-    pingMid = Color(0xFFFFB020),
-    pingBad = colorZeroFailure,
-)
+val zeroHomeColors: ZeroHomeColors
+    get() {
+        val t = currentTheme
+        return ZeroHomeColors(
+            textPrimary = t.textPrimary,
+            textSecondary = t.textSecondary,
+            cardBg = t.cardBg,
+            cardBorder = t.cardBorder,
+            pillBg = t.pillBg,
+            accent = t.accent,
+            pingGood = t.pingGood,
+            pingMid = t.pingMid,
+            pingBad = t.pingBad,
+        )
+    }
 
 /** Formats seconds as HH:MM:SS (or MM:SS below one hour). */
 fun formatUptime(seconds: Long): String {
@@ -308,12 +312,12 @@ fun ZeroApp() {
     }
     CompositionLocalProvider(
         LocalLayoutDirection provides LayoutDirection.Rtl,
-        LocalTextStyle provides TextStyle(fontFamily = fontFamilyVazir, color = Color.White),
+        LocalTextStyle provides TextStyle(fontFamily = fontFamilyVazir, color = colorTextPrimary),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Brush.verticalGradient(listOf(colorBgTop, colorBgBottom)))
+                .zeroBackgroundGlow()
         ) {
             Column(Modifier.fillMaxSize()) {
                 Box(Modifier.weight(1f)) {
@@ -326,7 +330,7 @@ fun ZeroApp() {
                 ZeroBottomNav()
             }
 
-            // Side drawer (home hamburger)
+            // Side drawer (servers-screen hamburger)
             if (Store.drawerOpen) AppDrawer()
 
             Store.busyMsg?.let { msg ->
@@ -341,7 +345,8 @@ fun ZeroApp() {
 }
 
 // ---------------------------------------------------------------------------
-// Home top bar: drawer menu + brand — port of ZeroHomeTopBar
+// Home top bar — brand only at the start edge (the hamburger's old spot;
+// the brand takes its place exactly like the phone app).
 // ---------------------------------------------------------------------------
 @Composable
 fun ZeroHomeTopBar(modifier: Modifier = Modifier) {
@@ -350,17 +355,9 @@ fun ZeroHomeTopBar(modifier: Modifier = Modifier) {
         modifier = modifier
             .fillMaxWidth()
             .height(58.dp)
-            .padding(horizontal = 6.dp),
+            .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(onClick = { Store.drawerOpen = true }) {
-            Icon(
-                imageVector = ZeroIcons.menu,
-                contentDescription = "منو",
-                tint = hc.textPrimary
-            )
-        }
-        Spacer(Modifier.width(6.dp))
         val logoPainter = remember { loadLogoPainter() }
         logoPainter?.let {
             Image(painter = it, contentDescription = null, modifier = Modifier.size(30.dp))
@@ -372,7 +369,6 @@ fun ZeroHomeTopBar(modifier: Modifier = Modifier) {
             fontSize = 17.sp,
             fontWeight = FontWeight.Bold
         )
-        Spacer(Modifier.weight(1f))
     }
 }
 
@@ -584,11 +580,13 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         // --- Current server card -------------------------------------------
         val sel = Store.selectedProfile
         val host = sel?.let { ServerInfo.hostPort(it.link)?.first }
-        val countryLine = sel?.let { p ->
-            listOf(protoLabel(p.proto), host).filterNotNull().joinToString("  ·  ")
-        }
+        val geo = host?.let { GeoLookup.byHost[it] }
+        val flag = countryCodeToFlagEmoji(geo?.cc)
+        val countryName = localizedCountryName(geo?.cc) ?: geo?.cc
+        val countryLine = listOf(countryName, geo?.ip ?: host).filterNotNull().joinToString("  ·  ")
         ZeroServerCard(
             serverName = sel?.name ?: "هیچ سروری انتخاب نشده",
+            flagEmoji = flag,
             countryLabel = countryLine,
             pingMillis = sel?.let { Store.pingMap[it.id] },
             quota = Store.selectedQuota,
@@ -970,7 +968,8 @@ private fun ZeroServerCard(
     quota: Pair<Long, Long>? = null,
     onClick: () -> Unit,
     hc: ZeroHomeColors,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    flagEmoji: String? = null,
 ) {
     val cardShape = RoundedCornerShape(18.dp)
     Row(
@@ -984,10 +983,17 @@ private fun ZeroServerCard(
             .padding(horizontal = 14.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = "🌐",
-            fontSize = 26.sp
-        )
+        if (flagEmoji != null) {
+            Text(
+                text = flagEmoji,
+                fontSize = 26.sp
+            )
+        } else {
+            Text(
+                text = "🌐",
+                fontSize = 26.sp
+            )
+        }
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(

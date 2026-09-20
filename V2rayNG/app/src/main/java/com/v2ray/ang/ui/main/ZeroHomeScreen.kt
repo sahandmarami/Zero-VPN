@@ -191,11 +191,12 @@ private fun zeroHomeColors(): ZeroHomeColors {
 }
 
 // ---------------------------------------------------------------------------
-// Home top bar: drawer menu + brand. (The settings gear was removed —
-// settings stays reachable through the bottom tab.)
+// Home top bar: brand only — the hamburger was removed on request and the
+// Zero VPN logo + name take its place. (The settings gear was removed
+// earlier; settings stays reachable through the bottom tab.) The drawer
+// remains accessible from the servers screen menu icon.
 @Composable
 fun ZeroHomeTopBar(
-    onMenuClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val hc = zeroHomeColors()
@@ -204,17 +205,9 @@ fun ZeroHomeTopBar(
             .fillMaxWidth()
             .statusBarsPadding()
             .height(58.dp)
-            .padding(horizontal = 6.dp),
+            .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(onClick = onMenuClick) {
-            Icon(
-                painter = painterResource(R.drawable.ic_menu_24dp),
-                contentDescription = stringResource(R.string.acc_open_menu),
-                tint = hc.textPrimary
-            )
-        }
-        Spacer(Modifier.width(6.dp))
         Image(
             painter = painterResource(R.drawable.zero_logo),
             contentDescription = null,
@@ -227,7 +220,6 @@ fun ZeroHomeTopBar(
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold
         )
-        Spacer(Modifier.weight(1f))
     }
 }
 

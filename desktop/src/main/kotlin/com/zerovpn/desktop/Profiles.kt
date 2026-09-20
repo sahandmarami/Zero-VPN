@@ -143,6 +143,50 @@ object Profiles {
         else added to "$added سرور دریافت شد"
     }
 
+    /** Refreshes ONE subscription (keeps other groups' profiles intact). */
+    fun refreshSingleSub(url: String): Pair<Int, String> {
+        val sub = Store.subscriptionFor(url) ?: return 0 to "اشتراک پیدا نشد"
+        return try {
+            Store.busyMsg = "در حال دریافت: ${sub.name}"
+            val (body, info) = fetchWithInfo(sub.url)
+            val links = parseBody(body)
+            val fresh = links.map { p ->
+                ProfileRec(
+                    id = stableId(p.link),
+                    name = p.name,
+                    proto = p.proto,
+                    link = p.link,
+                    sub = sub.url,
+                )
+            }
+            synchronized(Store) {
+                val others = Store.profiles.filter { it.sub != sub.url }
+                Store.data = Store.data.copy(profiles = others + fresh)
+                Store.data = Store.data.copy(
+                    subscriptions = Store.subscriptions.map {
+                        if (it.url == sub.url)
+                            it.copy(
+                                lastFetch = System.currentTimeMillis(),
+                                used = info?.used ?: it.used,
+                                total = info?.total ?: it.total,
+                                expire = info?.expire ?: it.expire,
+                            )
+                        else it
+                    }
+                )
+                if (Store.selectedId == null && fresh.isNotEmpty()) {
+                    Store.data = Store.data.copy(selected = fresh.first().id)
+                }
+                Store.save()
+            }
+            Store.busyMsg = null
+            fresh.size to "${fresh.size} سرور دریافت شد"
+        } catch (t: Throwable) {
+            Store.busyMsg = null
+            0 to "خطا در دریافت: ${t.message ?: t.javaClass.simpleName}"
+        }
+    }
+
     fun importText(text: String): Int {
         val links = parseBody(text)
         var n = 0

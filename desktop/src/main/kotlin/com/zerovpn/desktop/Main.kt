@@ -23,7 +23,8 @@ import java.io.File
 import javax.imageio.ImageIO
 
 // ---------------------------------------------------------------------------
-// Zero VPN neon palette (matches the Android app)
+// Zero VPN neon palette (matches the Android app) — theme surfaces live in
+// Theme.kt so the app can switch between the phone's light look and dark.
 // ---------------------------------------------------------------------------
 val colorZeroNeon = Color(0xFF00A8F5)
 val colorZeroNeonSoft = Color(0xFF35C6FF)
@@ -31,12 +32,6 @@ val colorZeroDeep = Color(0xFF0084D4)
 val colorZeroIdle = Color(0xFF3A4A61)
 val colorZeroTesting = Color(0xFFFFB020)
 val colorZeroFailure = Color(0xFFFF5470)
-val colorBgTop = Color(0xFF0A1018)
-val colorBgBottom = Color(0xFF0D1626)
-val colorCard = Color(0xFF141A24)
-val colorCardBorder = Color(0xFF212C3C)
-val colorTextSecondary = Color(0xFF7C8CA6)
-val colorPill = Color(0xFF12171F)
 
 val fontFamilyVazir: FontFamily by lazy {
     try {
@@ -103,8 +98,8 @@ fun ZeroTheme(content: @Composable () -> Unit) {
             primary = colorZeroNeon,
             background = colorBgTop,
             surface = colorCard,
-            onBackground = Color.White,
-            onSurface = Color.White,
+            onBackground = colorTextPrimary,
+            onSurface = colorTextPrimary,
         ),
         content = content
     )

@@ -37,9 +37,12 @@ fun MainTopBar(
     onSearchToggle: (Boolean) -> Unit,
     onMenuClick: () -> Unit,
     onAction: (MainAction) -> Unit,
+    onMoreMenuAction: (MainMoreMenuAction) -> Unit,
 ) {
     var showImportMenu by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
     val importMenuScrollState = rememberScrollState()
+    val moreMenuScrollState = rememberScrollState()
     val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navBarHeight = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val maxMenuHeight = LocalConfiguration.current.screenHeightDp.dp - statusBarHeight - navBarHeight - 20.dp
@@ -89,6 +92,25 @@ fun MainTopBar(
                             onAction(action)
                         }
                     )
+                }
+            }
+            Box(modifier = Modifier.wrapContentSize(Alignment.TopEnd)) {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(painterResource(R.drawable.ic_more_vert_24dp), contentDescription = stringResource(R.string.acc_more))
+                }
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false },
+                    scrollState = moreMenuScrollState,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier
+                        .heightIn(max = maxMenuHeight)
+                        .verticalScrollbar(moreMenuScrollState)
+                ) {
+                    MoreMenuContent { action ->
+                        showMenu = false
+                        onMoreMenuAction(action)
+                    }
                 }
             }
         }

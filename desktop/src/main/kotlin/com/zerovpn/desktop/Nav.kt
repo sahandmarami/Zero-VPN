@@ -58,8 +58,8 @@ private val NAV_BAR_HEIGHT = 78.dp
 private val BLOB_GRADIENT_TOP = Color(0xFF35C6FF)
 private val BLOB_GRADIENT_BOTTOM = Color(0xFF0084D4)
 
-private val NAV_BAR_BACKGROUND = Color(0xE60B1018)
-private val NAV_INACTIVE = Color(0xFF7C8CA6)
+private val NAV_BAR_BACKGROUND: Color get() = currentTheme.navBarBg
+private val NAV_INACTIVE: Color get() = currentTheme.navInactive
 
 @Composable
 fun ZeroBottomNav(modifier: Modifier = Modifier) {

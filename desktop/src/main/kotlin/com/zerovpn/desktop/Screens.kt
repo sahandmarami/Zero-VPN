@@ -29,14 +29,19 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -47,8 +52,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 // ---------------------------------------------------------------------------
-// LOCATIONS — server list, styled after the Android server rows:
-// selection bar on the side, name + copy/delete icons, protocol + ping line.
+// LOCATIONS — 1:1 port of the Android servers screen: group tab pills,
+// subscription card (quota bar / expiry / refresh), server rows with a
+// country-flag chip + share/edit/delete actions.
 // ---------------------------------------------------------------------------
 @Composable
 fun LocationsScreen(modifier: Modifier = Modifier) {
@@ -56,7 +62,28 @@ fun LocationsScreen(modifier: Modifier = Modifier) {
     var showSearch by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var showMenu by remember { mutableStateOf(false) }
+    var showMoreMenu by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<ProfileRec?>(null) }
+    var editTarget by remember { mutableStateOf<ProfileRec?>(null) }
+    var editSubTarget by remember { mutableStateOf<SubRec?>(null) }
+    var deleteSubTarget by remember { mutableStateOf<SubRec?>(null) }
+    var showDelAllConfirm by remember { mutableStateOf(false) }
+    var groupChosen by remember { mutableStateOf(false) }
+
+    val hc = zeroHomeColors
+    val tabs = Store.groupTabs()
+    val activeGroup: String? = if (groupChosen) Store.selectedGroup else tabs.firstOrNull()?.first
+    val sub = Store.subscriptionFor(activeGroup)
+    val profiles = Store.profilesForGroup(activeGroup).filter {
+        searchQuery.isBlank() || it.name.contains(searchQuery, ignoreCase = true)
+    }
+
+    // Geo (flag + IP) prefetch for every host in the visible group.
+    LaunchedEffect(profiles.map { it.id }) {
+        profiles.forEach { p ->
+            ServerInfo.hostPort(p.link)?.first?.let { GeoLookup.ensureLookup(it) }
+        }
+    }
 
     Column(
         modifier = modifier
@@ -64,13 +91,17 @@ fun LocationsScreen(modifier: Modifier = Modifier) {
             .padding(horizontal = 8.dp)
     ) {
         Spacer(Modifier.height(8.dp))
-        // --- Header (like the Android locations top bar) --------------------
+        // --- Header (like the Android locations top bar):
+        // hamburger (drawer) | title | search + add + overflow ----------------
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
         ) {
+            IconButton(onClick = { Store.drawerOpen = true }) {
+                Icon(ZeroIcons.menu, "منو", tint = hc.textPrimary)
+            }
             Text(
-                "سرورها",
+                "فایل کانفیگ",
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f)
@@ -79,11 +110,11 @@ fun LocationsScreen(modifier: Modifier = Modifier) {
                 showSearch = !showSearch
                 if (!showSearch) searchQuery = ""
             }) {
-                Icon(ZeroIcons.search, "جستجو", tint = zeroHomeColors.textSecondary)
+                Icon(ZeroIcons.search, "جستجو", tint = hc.textSecondary)
             }
             Box {
                 IconButton(onClick = { showMenu = true }) {
-                    Icon(ZeroIcons.add, "افزودن", tint = zeroHomeColors.textPrimary)
+                    Icon(ZeroIcons.add, "افزودن", tint = hc.textPrimary)
                 }
                 DropdownMenu(
                     expanded = showMenu,
@@ -104,12 +135,36 @@ fun LocationsScreen(modifier: Modifier = Modifier) {
                     }
                 }
             }
+            // Overflow (three-dot) menu — same entries as the Android app.
+            Box {
+                IconButton(onClick = { showMoreMenu = true }) {
+                    Icon(ZeroIcons.moreVert, "بیشتر", tint = hc.textPrimary)
+                }
+                DropdownMenu(
+                    expanded = showMoreMenu,
+                    onDismissRequest = { showMoreMenu = false },
+                    containerColor = colorCard,
+                ) {
+                    ZeroDropdownItem("تست همه سرورها") {
+                        showMoreMenu = false
+                        Connector.testAll()
+                    }
+                    ZeroDropdownItem("بروزرسانی اشتراک‌ها") {
+                        showMoreMenu = false
+                        Connector.updateSubs()
+                    }
+                    ZeroDropdownItem("حذف همه سرورها") {
+                        showMoreMenu = false
+                        showDelAllConfirm = true
+                    }
+                }
+            }
         }
         if (showSearch) {
             TextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = { Text("جستجو…", fontSize = 13.sp, color = colorTextSecondary) },
+                placeholder = { Text("جستجو…", fontSize = 13.sp, color = hc.textSecondary) },
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
                 colors = TextFieldDefaults.colors(
@@ -117,8 +172,8 @@ fun LocationsScreen(modifier: Modifier = Modifier) {
                     unfocusedContainerColor = colorPill,
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
+                    focusedTextColor = hc.textPrimary,
+                    unfocusedTextColor = hc.textPrimary,
                     cursorColor = colorZeroNeon,
                 ),
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
@@ -126,17 +181,72 @@ fun LocationsScreen(modifier: Modifier = Modifier) {
         }
         Spacer(Modifier.height(4.dp))
 
-        val profiles = Store.profiles.filter {
-            searchQuery.isBlank() || it.name.contains(searchQuery, ignoreCase = true)
+        // --- Group tab bar (port of GroupTabBar) ----------------------------
+        if (tabs.size > 1 || Store.subscriptions.isNotEmpty()) {
+            val tabScroll = rememberScrollState()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(colorCard.copy(alpha = 0.92f))
+                    .horizontalScroll(tabScroll)
+                    .padding(5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                tabs.forEach { (url, count) ->
+                    val name = if (url == null) "Default" else Store.subscriptionFor(url)?.name ?: "اشتراک"
+                    val selected = url == activeGroup
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(
+                                if (selected) hc.accent.copy(alpha = 0.18f) else Color.Transparent
+                            )
+                            .clickable {
+                                Store.selectedGroup = url
+                                groupChosen = true
+                            }
+                            .padding(horizontal = 14.dp, vertical = 9.dp)
+                    ) {
+                        Text(
+                            text = "$name ($count)",
+                            color = if (selected) hc.accent else hc.textSecondary,
+                            fontSize = 13.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+            }
         }
+
+        // --- Subscription card (port of the Zero sub card) ------------------
+        if (sub != null) {
+            SubscriptionCard(
+                sub = sub,
+                onRefresh = {
+                    Store.scope.launch {
+                        val (n, msg) = withContext(Dispatchers.IO) { Profiles.refreshSingleSub(sub.url) }
+                        Store.toast(msg)
+                    }
+                },
+                onEdit = { editSubTarget = sub },
+                onDelete = { deleteSubTarget = sub },
+            )
+            Spacer(Modifier.height(4.dp))
+        }
+
         if (profiles.isEmpty()) {
             Spacer(Modifier.height(40.dp))
             Text(
                 if (Store.profiles.isEmpty())
                     "هنوز سروری ندارید\nبا دکمه + اشتراک یا کانفیگ اضافه کنید"
-                else "نتیجه‌ای برای «$searchQuery» پیدا نشد",
+                else if (searchQuery.isNotBlank()) "نتیجه‌ای برای «$searchQuery» پیدا نشد"
+                else "این گروه خالی است",
                 fontSize = 13.sp,
-                color = colorTextSecondary,
+                color = hc.textSecondary,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -147,10 +257,11 @@ fun LocationsScreen(modifier: Modifier = Modifier) {
                         profile = p,
                         selected = p.id == Store.selectedId,
                         onSelect = { Store.select(p.id) },
-                        onCopy = {
+                        onShare = {
                             setClipboard(p.link)
                             Store.toast("لینک کانفیگ کپی شد")
                         },
+                        onEdit = { editTarget = p },
                         onDelete = { deleteTarget = p },
                     )
                     Row(
@@ -183,25 +294,272 @@ fun LocationsScreen(modifier: Modifier = Modifier) {
             }
         )
     }
+    editTarget?.let { target ->
+        RenameDialog(
+            title = "ویرایش سرور",
+            initial = target.name,
+            onDismiss = { editTarget = null },
+            onConfirm = { newName ->
+                Store.renameProfile(target.id, newName)
+                editTarget = null
+                Store.toast("نام سرور ذخیره شد")
+            }
+        )
+    }
+    editSubTarget?.let { target ->
+        RenameDialog(
+            title = "ویرایش اشتراک",
+            initial = target.name,
+            onDismiss = { editSubTarget = null },
+            onConfirm = { newName ->
+                Store.updateSubscription(target.url, newName)
+                editSubTarget = null
+                Store.toast("نام اشتراک ذخیره شد")
+            }
+        )
+    }
+    deleteSubTarget?.let { target ->
+        ConfirmDialog(
+            title = "حذف اشتراک",
+            message = "«${target.name}» و همه سرورهای آن حذف شود؟",
+            confirmLabel = "حذف",
+            onDismiss = { deleteSubTarget = null },
+            onConfirm = {
+                Store.removeSubscription(target.url)
+                Store.selectedGroup = null
+                groupChosen = false
+                deleteSubTarget = null
+                Store.toast("اشتراک حذف شد")
+            }
+        )
+    }
+    if (showDelAllConfirm) {
+        ConfirmDialog(
+            title = "حذف همه سرورها",
+            message = "همه کانفیگ‌ها و اشتراک‌ها حذف شوند؟ این عمل قابل بازگشت نیست.",
+            confirmLabel = "حذف",
+            onDismiss = { showDelAllConfirm = false },
+            onConfirm = {
+                showDelAllConfirm = false
+                Store.clearProfiles()
+                Store.selectedGroup = null
+                groupChosen = false
+                Store.toast("همه سرورها حذف شدند")
+            }
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Drawer (servers-screen hamburger) — slides over from the start (right) edge,
+// exactly like the phone's navigation drawer in RTL.
+// ---------------------------------------------------------------------------
+@Composable
+fun AppDrawer() {
+    val hc = zeroHomeColors
+    Row(Modifier.fillMaxSize()) {
+        // Panel occupies the trailing side in RTL — place it first so RTL
+        // mirroring puts it on the right, exactly like the phone drawer.
+        Column(
+            modifier = Modifier
+                .width(290.dp)
+                .fillMaxHeight()
+                .background(hc.cardBg)
+                .padding(16.dp)
+        ) {
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val logoPainter = remember { loadLogoPainter() }
+                logoPainter?.let {
+                    androidx.compose.foundation.Image(
+                        painter = it, contentDescription = null, modifier = Modifier.size(34.dp)
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Text("Zero VPN", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = hc.textPrimary)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text("v$APP_VERSION", fontSize = 11.sp, color = hc.textSecondary)
+            Spacer(Modifier.height(14.dp))
+            androidx.compose.material3.HorizontalDivider(color = hc.cardBorder)
+
+            Spacer(Modifier.height(10.dp))
+            DrawerItem(ZeroIcons.refresh, "بروزرسانی اشتراک‌ها") {
+                Store.drawerOpen = false
+                Connector.updateSubs()
+            }
+            DrawerItem(ZeroIcons.add, "افزودن اشتراک") {
+                Store.drawerOpen = false
+                Store.pendingAddSub = true
+            }
+            DrawerItem(ZeroIcons.copy, "از کلیپ‌بورد") {
+                Store.drawerOpen = false
+                Connector.importClipboard()
+            }
+            DrawerItem(ZeroIcons.settings, "تنظیمات") {
+                Store.drawerOpen = false
+                Store.view = "settings"
+            }
+            DrawerItem(ZeroIcons.locations, "سرورها") {
+                Store.drawerOpen = false
+                Store.view = "locations"
+            }
+        }
+        // Scrim
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .background(Color.Black.copy(alpha = 0.55f))
+                .clickable { Store.drawerOpen = false }
+        )
+    }
+}
+
+@Composable
+private fun DrawerItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    val hc = zeroHomeColors
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, null, Modifier.size(22.dp), tint = hc.accent)
+        Spacer(Modifier.width(12.dp))
+        Text(label, fontSize = 14.sp, color = hc.textPrimary)
+    }
+}
+
+/** Group subscription card — quota progress, remaining, expiry, actions. */
+@Composable
+private fun SubscriptionCard(
+    sub: SubRec,
+    onRefresh: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val hc = zeroHomeColors
+    val cardShape = RoundedCornerShape(16.dp)
+    val hasQuota = sub.total > 0
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 4.dp)
+            .clip(cardShape)
+            .background(hc.accent.copy(alpha = 0.10f))
+            .border(1.dp, hc.accent.copy(alpha = 0.25f), cardShape)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                sub.name,
+                Modifier.weight(1f),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = hc.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            IconButton(onClick = onRefresh, Modifier.size(34.dp)) {
+                Icon(ZeroIcons.refresh, "بروزرسانی", Modifier.size(20.dp), tint = hc.accent)
+            }
+            IconButton(onClick = onEdit, Modifier.size(34.dp)) {
+                Icon(ZeroIcons.edit, "ویرایش", Modifier.size(20.dp), tint = hc.textSecondary)
+            }
+            IconButton(onClick = onDelete, Modifier.size(34.dp)) {
+                Icon(ZeroIcons.delete, "حذف", Modifier.size(20.dp), tint = hc.textSecondary)
+            }
+        }
+
+        if (hasQuota) {
+            val progress = (sub.used.toFloat() / sub.total).coerceIn(0f, 1f)
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(5.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(hc.accent.copy(alpha = 0.15f))
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(progress)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(50))
+                        .background(
+                            Brush.horizontalGradient(listOf(colorZeroNeonSoft, colorZeroDeep))
+                        )
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "${trafficString(sub.used)} از ${trafficString(sub.total)}",
+                    fontSize = 12.sp,
+                    color = hc.textPrimary
+                )
+                Spacer(Modifier.weight(1f))
+                val remaining = (sub.total - sub.used).coerceAtLeast(0)
+                Text(
+                    text = "${trafficString(remaining)} باقی مانده",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (remaining <= 0L) hc.pingBad else hc.accent
+                )
+            }
+        }
+
+        val expireText = if (sub.expire > 0) {
+            val expired = sub.expire * 1000L < System.currentTimeMillis()
+            if (expired) "منقضی شده"
+            else "انقضا: " + java.text.SimpleDateFormat(
+                "yyyy/MM/dd", java.util.Locale.getDefault()
+            ).format(java.util.Date(sub.expire * 1000L))
+        } else ""
+        val updatedText = if (sub.lastFetch > 0) {
+            "بروزرسانی: " + java.text.SimpleDateFormat(
+                "yyyy/MM/dd HH:mm", java.util.Locale.getDefault()
+            ).format(java.util.Date(sub.lastFetch))
+        } else ""
+        val meta = listOf(expireText, updatedText).filter { it.isNotEmpty() }.joinToString("  ·  ")
+        if (meta.isNotEmpty()) {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                meta,
+                fontSize = 11.sp,
+                color = hc.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
 }
 
 @Composable
 private fun ZeroDropdownItem(label: String, onClick: () -> Unit) {
     androidx.compose.material3.DropdownMenuItem(
-        text = { Text(label, fontSize = 13.sp, color = Color.White) },
+        text = { Text(label, fontSize = 13.sp, color = colorTextPrimary) },
         onClick = onClick,
     )
 }
 
-/** Android ServerListItem look: side selection bar + name + icons + ping. */
+/** Android ServerListItem look: side selection bar + name + flag chip + actions. */
 @Composable
 private fun ServerRow(
     profile: ProfileRec,
     selected: Boolean,
     onSelect: () -> Unit,
-    onCopy: () -> Unit,
+    onShare: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val hc = zeroHomeColors
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -223,7 +581,7 @@ private fun ServerRow(
                             .width(4.dp)
                             .fillMaxHeight()
                             .padding(vertical = 10.dp)
-                            .background(colorZeroNeon)
+                            .background(hc.accent)
                     )
                 }
             }
@@ -239,52 +597,121 @@ private fun ServerRow(
                     Modifier.weight(1f),
                     fontSize = 15.sp,
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    color = hc.textPrimary
                 )
-                IconButton(onClick = onCopy, Modifier.size(36.dp)) {
-                    Icon(
-                        ZeroIcons.copy,
-                        "کپی لینک",
-                        Modifier.size(20.dp),
-                        tint = colorTextSecondary
-                    )
+                // Country flag chip right next to the server name (like Android).
+                val host = remember(profile.id) { ServerInfo.hostPort(profile.link)?.first ?: "" }
+                val geo = GeoLookup.byHost[host]
+                geo?.cc?.let { cc -> ZeroGeoChip(countryCode = cc) }
+                IconButton(onClick = onShare, Modifier.size(36.dp)) {
+                    Icon(ZeroIcons.share, "اشتراک لینک", Modifier.size(20.dp), tint = hc.textSecondary)
+                }
+                IconButton(onClick = onEdit, Modifier.size(36.dp)) {
+                    Icon(ZeroIcons.edit, "ویرایش", Modifier.size(20.dp), tint = hc.textSecondary)
                 }
                 IconButton(onClick = onDelete, Modifier.size(36.dp)) {
-                    Icon(
-                        ZeroIcons.delete,
-                        "حذف",
-                        Modifier.size(20.dp),
-                        tint = colorTextSecondary
-                    )
+                    Icon(ZeroIcons.delete, "حذف", Modifier.size(20.dp), tint = hc.textSecondary)
                 }
             }
             Spacer(modifier = Modifier.height(4.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                val hostPort = remember(profile.id) { ServerInfo.hostPort(profile.link) }
+                Text(
+                    listOfNotNull(hostPort?.first, hostPort?.second?.toString()).joinToString(":"),
+                    Modifier.weight(1f),
+                    fontSize = 12.sp,
+                    color = hc.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(modifier = Modifier.height(2.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     protoLabel(profile.proto),
                     Modifier.weight(1f, fill = false),
                     fontSize = 12.sp,
-                    color = colorZeroNeonSoft,
+                    color = hc.accent,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(Modifier.width(8.dp))
                 val host = remember(profile.id) { ServerInfo.hostPort(profile.link)?.first ?: "" }
-                Text(
-                    host,
-                    Modifier.weight(1f),
-                    fontSize = 12.sp,
-                    color = colorTextSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                val geo = GeoLookup.byHost[host]
+                geo?.ip?.let { ip ->
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        ip,
+                        fontSize = 12.sp,
+                        color = hc.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(Modifier.weight(1f))
                 val ms = Store.pingMap[profile.id]
                 Text(
                     text = if (ms != null && ms > 0) "$ms ms" else "",
                     fontSize = 12.sp,
-                    color = pingColor(ms) ?: colorTextSecondary,
+                    color = pingColor(ms) ?: hc.textSecondary,
                     maxLines = 1
                 )
+            }
+        }
+    }
+}
+
+/** Tiny country chip (flag + ISO code) — port of the Android ZeroGeoChip. */
+@Composable
+private fun ZeroGeoChip(countryCode: String) {
+    val hc = zeroHomeColors
+    val flag = countryCodeToFlagEmoji(countryCode)
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(hc.accent.copy(alpha = 0.12f))
+            .padding(horizontal = 7.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (flag != null) {
+            Text(text = flag, fontSize = 12.sp)
+            Spacer(Modifier.width(3.dp))
+        }
+        Text(
+            text = countryCode.uppercase(),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = hc.accent
+        )
+    }
+}
+
+/** Simple rename dialog used for server + subscription editing. */
+@Composable
+private fun RenameDialog(
+    title: String,
+    initial: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var text by remember { mutableStateOf(initial) }
+    DialogShell {
+        Text(title, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(10.dp))
+        ZeroTextField(
+            value = text,
+            onValueChange = { text = it },
+            placeholder = "نام",
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ZeroChip("انصراف", primary = false, modifier = Modifier.weight(1f)) { onDismiss() }
+            ZeroChip("ذخیره", primary = true, modifier = Modifier.weight(1f)) {
+                val t = text.trim()
+                if (t.isNotEmpty()) {
+                    onDismiss()
+                    onConfirm(t)
+                }
             }
         }
     }
@@ -317,6 +744,34 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         Text("تنظیمات", fontSize = 17.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
 
+        ZeroSettingsGroup("شخصی‌سازی") {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("حالت نمایش", fontSize = 14.sp, color = colorTextPrimary)
+                    Text(
+                        "همان پوسته روشن برنامه اندروید",
+                        fontSize = 11.sp,
+                        color = colorTextSecondary
+                    )
+                }
+                Switch(
+                    checked = ThemeState.dark,
+                    onCheckedChange = { Store.setTheme(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedTrackColor = colorZeroNeon,
+                        checkedThumbColor = Color.White,
+                        uncheckedTrackColor = currentTheme.switchOffTrack,
+                        uncheckedThumbColor = colorTextSecondary,
+                        uncheckedBorderColor = Color.Transparent,
+                    )
+                )
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
         ZeroSettingsGroup("اتصال") {
             ZeroSettingsRow(
                 title = "پورت SOCKS",
@@ -328,7 +783,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("پراکسی سیستم هنگام اتصال", fontSize = 14.sp)
+                    Text("پراکسی سیستم هنگام اتصال", fontSize = 14.sp, color = colorTextPrimary)
                     Text(
                         "مرورگرها به‌صورت خودکار از تونل استفاده می‌کنند",
                         fontSize = 11.sp,
@@ -341,7 +796,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                     colors = SwitchDefaults.colors(
                         checkedTrackColor = colorZeroNeon,
                         checkedThumbColor = Color.White,
-                        uncheckedTrackColor = Color(0xFF2A3547),
+                        uncheckedTrackColor = currentTheme.switchOffTrack,
                         uncheckedThumbColor = colorTextSecondary,
                         uncheckedBorderColor = Color.Transparent,
                     )
@@ -481,89 +936,9 @@ private fun ZeroSettingsRow(title: String, value: String? = null, onClick: () ->
 }
 
 // ---------------------------------------------------------------------------
-// Drawer (home hamburger) — slides over from the right edge, exactly like
-// the phone's navigation drawer in RTL.
+// (The home drawer was removed — the hamburger is gone and every entry now
+// lives in the bottom tabs and the + menu, like the phone app.)
 // ---------------------------------------------------------------------------
-@Composable
-fun AppDrawer() {
-    Row(Modifier.fillMaxSize()) {
-        // Panel occupies the trailing side in RTL — place it first so RTL
-        // mirroring puts it on the right, exactly like the phone drawer.
-        Column(
-            modifier = Modifier
-                .width(290.dp)
-                .fillMaxHeight()
-                .background(colorCard)
-                .padding(16.dp)
-        ) {
-            Spacer(Modifier.height(6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val logoPainter = remember { loadLogoPainter() }
-                logoPainter?.let {
-                    androidx.compose.foundation.Image(
-                        painter = it, contentDescription = null, modifier = Modifier.size(34.dp)
-                    )
-                }
-                Spacer(Modifier.width(10.dp))
-                Text("Zero VPN", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            }
-            Spacer(Modifier.height(8.dp))
-            Text("v$APP_VERSION", fontSize = 11.sp, color = colorTextSecondary)
-            Spacer(Modifier.height(14.dp))
-            androidx.compose.material3.HorizontalDivider(color = colorCardBorder)
-
-            Spacer(Modifier.height(10.dp))
-            DrawerItem(ZeroIcons.refresh, "بروزرسانی اشتراک‌ها") {
-                Store.drawerOpen = false
-                Connector.updateSubs()
-            }
-            DrawerItem(ZeroIcons.add, "افزودن اشتراک") {
-                Store.drawerOpen = false
-                Store.pendingAddSub = true
-            }
-            DrawerItem(ZeroIcons.copy, "از کلیپ‌بورد") {
-                Store.drawerOpen = false
-                Connector.importClipboard()
-            }
-            DrawerItem(ZeroIcons.settings, "تنظیمات") {
-                Store.drawerOpen = false
-                Store.view = "settings"
-            }
-            DrawerItem(ZeroIcons.locations, "سرورها") {
-                Store.drawerOpen = false
-                Store.view = "locations"
-            }
-        }
-        // Scrim
-        Box(
-            Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .background(Color.Black.copy(alpha = 0.55f))
-                .clickable { Store.drawerOpen = false }
-        )
-    }
-}
-
-@Composable
-private fun DrawerItem(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, null, Modifier.size(22.dp), tint = colorZeroNeonSoft)
-        Spacer(Modifier.width(12.dp))
-        Text(label, fontSize = 14.sp)
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Dialogs / banners
@@ -684,8 +1059,8 @@ private fun ZeroTextField(
             unfocusedContainerColor = colorPill,
             focusedIndicatorColor = Color.Transparent,
             unfocusedIndicatorColor = Color.Transparent,
-            focusedTextColor = Color.White,
-            unfocusedTextColor = Color.White,
+            focusedTextColor = currentTheme.fieldText,
+            unfocusedTextColor = currentTheme.fieldText,
             cursorColor = colorZeroNeon,
         ),
         modifier = Modifier.fillMaxWidth()
@@ -729,11 +1104,11 @@ fun BusyBanner(msg: String, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF16283E).copy(alpha = 0.95f))
+            .background(currentTheme.bannerBg)
             .border(1.dp, colorCardBorder, RoundedCornerShape(12.dp))
             .padding(horizontal = 14.dp, vertical = 8.dp),
     ) {
-        Text(msg, fontSize = 12.sp, color = colorZeroNeonSoft)
+        Text(msg, fontSize = 12.sp, color = colorZeroDeep)
     }
 }
 
@@ -742,10 +1117,10 @@ fun ToastBanner(msg: String, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF1B2430).copy(alpha = 0.97f))
+            .background(currentTheme.bannerBg)
             .border(1.dp, colorCardBorder, RoundedCornerShape(12.dp))
             .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
-        Text(msg, fontSize = 12.sp, textAlign = TextAlign.Center)
+        Text(msg, fontSize = 12.sp, textAlign = TextAlign.Center, color = colorTextPrimary)
     }
 }
