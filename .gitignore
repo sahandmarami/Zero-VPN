@@ -1,5 +1,6 @@
 # Ignore data and key store files
 *.dat
+# (geo dat files for the app assets are force-added explicitly)
 *.jks
 
 # Ignore output JSON file

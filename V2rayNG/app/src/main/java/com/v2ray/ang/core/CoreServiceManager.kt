@@ -146,6 +146,13 @@ object CoreServiceManager {
         // surprising the native layer.
         validateProfile(config)
 
+        // Zero VPN: the bundled Xray core validates geosite:/geoip: rules by
+        // actually reading geosite.dat/geoip.dat at config-build time. Missing
+        // geo assets used to surface as "illegal domain rule: geosite:..." and
+        // blocked fresh installs from connecting at all. Re-copy from the APK
+        // assets when the files are absent (cheap no-op when present).
+        SettingsManager.initAssets(service, service.assets)
+
         // Zero VPN: AmneziaWG profiles run through the embedded AmneziaWG
         // engine instead of the Xray core (no obfuscation support there).
         if (WireguardFmt.hasAwgParams(config)) {

@@ -152,10 +152,31 @@ fun AppSnackbarBridge(
 private val ToastCornerRadius = 24.dp
 private val ToastHorizontalPad = 16.dp
 private val ToastVerticalPad = 12.dp
-private const val ToastMaxLines = 8
+private const val ToastMaxLines = 5
 private const val ToastMaxWidthFraction = 0.75f
 private val ToastBottomOffset = 100.dp
 private const val SnackbarThrottleMs = 2000L
+
+/**
+ * Compact long core/stack error chains ("a > b > c > ..."). The raw Xray
+ * config errors can be several hundred characters; showing them verbatim
+ * floods the home screen (statistics row and server card end up covered) and
+ * the message becomes unreadable. Keep the most meaningful tail — the root
+ * cause is always the LAST segment of the chain — and cap the length.
+ */
+internal fun compactToastMessage(message: CharSequence, maxChars: Int = 180): String {
+    val raw = message.toString()
+    if (raw.length <= maxChars) return raw
+    val tailSegment = raw.substringAfterLast("> ", "").trim()
+    val suffix = tailSegment.ifBlank { raw.takeLast(maxChars / 2) }
+    val prefix = raw.take(60).trimEnd()
+    val compact = if (suffix.length > maxChars - prefix.length - 3) {
+        suffix.take(maxChars - prefix.length - 3)
+    } else {
+        suffix
+    }
+    return "$prefix… $compact…"
+}
 
 @Composable
 fun AppSnackbarHost(
@@ -206,7 +227,7 @@ fun AppSnackbarHost(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = data.visuals.message,
+                            text = compactToastMessage(data.visuals.message),
                             color = toastTextColor,
                             fontSize = 14.sp,
                             maxLines = ToastMaxLines,

@@ -118,12 +118,14 @@ val colorNeonGlow = Color(0xFF00A8F5) // Icon Ring Neon
 val colorDisconnectRed = Color(0xFFFF3D71) // Neon Red
 val colorDisconnectOrange = Color(0xFFFF7A45) // Neon Orange
 
-// Toast Colors 70%
-val toastNormalBgLight = Color(0xB3353A3E) // Dark Gray
-val toastNormalBgDark = Color(0xB34A4F54) // Darker Gray
-val toastSuccessBg = Color(0xB3388E3C) // Green
-val toastErrorBg = Color(0xB3D50000) // Red
-val toastInfoBg = Color(0xB33F51B5) // Indigo Blue
+// Toast Colors — fully opaque so underlying UI (stats row, server cards) never
+// bleeds through long error messages (the 70%-alpha version made Persian text
+// look broken/overlapping on small screens).
+val toastNormalBgLight = Color(0xFF353A3E) // Dark Gray
+val toastNormalBgDark = Color(0xFF4A4F54) // Darker Gray
+val toastSuccessBg = Color(0xFF388E3C) // Green
+val toastErrorBg = Color(0xFFD50000) // Red
+val toastInfoBg = Color(0xFF3F51B5) // Indigo Blue
 val toastIconCircleBg = Color(0x33FFFFFF) // Semi-transparent White
 val toastTextColor = Color.White // White
 
