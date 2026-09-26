@@ -27,6 +27,41 @@ object ThemeState {
     }
 }
 
+/**
+ * Pale background wash — picked ONCE per app launch at random from azure /
+ * mint / rose (user request: every time the app opens, a random pale blue,
+ * red or green background tint appears). All three stay extremely pale so
+ * the dark text keeps full contrast; the neon-blue accent, cards and pills
+ * are untouched so the brand look survives on every wash.
+ */
+data class BgWash(val base: Color, val glowTop: Color, val glowLeft: Color, val glowBottom: Color)
+
+private val WASH_AZURE = BgWash(
+    base = Color(0xFFF4F8FE),
+    glowTop = Color(0xFF35C6FF),
+    glowLeft = Color(0xFF4D8DFF),
+    glowBottom = Color(0xFF5AA8FF),
+)
+
+private val WASH_MINT = BgWash(
+    base = Color(0xFFF2FBF6),
+    glowTop = Color(0xFF3BD9A4),
+    glowLeft = Color(0xFF2FBF8F),
+    glowBottom = Color(0xFF43CFA0),
+)
+
+private val WASH_ROSE = BgWash(
+    base = Color(0xFFFEF3F5),
+    glowTop = Color(0xFFFF7A94),
+    glowLeft = Color(0xFFFF8E7C),
+    glowBottom = Color(0xFFFF9DA6),
+)
+
+/** Random pale wash for this launch — evaluated once per process. */
+val launchWash: BgWash by lazy {
+    listOf(WASH_AZURE, WASH_MINT, WASH_ROSE).random()
+}
+
 data class ZeroThemeColors(
     val bgBase: Color,
     val textPrimary: Color,
@@ -85,7 +120,7 @@ private val dark = ZeroThemeColors(
 )
 
 val currentTheme: ZeroThemeColors
-    get() = if (ThemeState.dark) dark else light
+    get() = if (ThemeState.dark) dark else light.copy(bgBase = launchWash.base)
 
 // --- Backwards-compatible top-level color accessors -------------------------
 // The codebase references colorCard / colorPill / ... as plain top-level vals.
@@ -102,7 +137,7 @@ val colorTextPrimary: Color get() = currentTheme.textPrimary
 // --- Background: flat base + layered neon glows (port of MainScreen) -------
 fun Modifier.zeroBackgroundGlow(): Modifier = drawBehind {
     val isDark = ThemeState.dark
-    drawRect(if (isDark) Color(0xFF070B11) else Color(0xFFF4F8FE))
+    drawRect(if (isDark) Color(0xFF070B11) else launchWash.base)
     if (isDark) {
         drawRect(
             brush = Brush.radialGradient(
@@ -126,23 +161,24 @@ fun Modifier.zeroBackgroundGlow(): Modifier = drawBehind {
             )
         )
     } else {
+        val wash = launchWash
         drawRect(
             brush = Brush.radialGradient(
-                colors = listOf(Color(0xFF35C6FF).copy(alpha = 0.30f), Color.Transparent),
+                colors = listOf(wash.glowTop.copy(alpha = 0.30f), Color.Transparent),
                 center = Offset(size.width / 2f, size.height * 0.10f),
                 radius = size.width * 1.0f
             )
         )
         drawRect(
             brush = Brush.radialGradient(
-                colors = listOf(Color(0xFF4D8DFF).copy(alpha = 0.16f), Color.Transparent),
+                colors = listOf(wash.glowLeft.copy(alpha = 0.16f), Color.Transparent),
                 center = Offset(size.width * 0.08f, size.height * 0.04f),
                 radius = size.width * 0.8f
             )
         )
         drawRect(
             brush = Brush.radialGradient(
-                colors = listOf(Color(0xFF5AA8FF).copy(alpha = 0.14f), Color.Transparent),
+                colors = listOf(wash.glowBottom.copy(alpha = 0.14f), Color.Transparent),
                 center = Offset(size.width / 2f, size.height * 0.86f),
                 radius = size.width * 0.95f
             )

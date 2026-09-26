@@ -1,5 +1,8 @@
 package com.zerovpn.desktop
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
@@ -465,10 +468,14 @@ object SysProxy {
 // ---------------------------------------------------------------------------
 object PingTest {
 
-    fun viaSocks(port: Int, timeoutMs: Int = 7000): Long = try {
+    fun viaSocks(
+        port: Int,
+        timeoutMs: Int = 7000,
+        url: String = "https://www.gstatic.com/generate_204",
+    ): Long = try {
         val start = System.currentTimeMillis()
         val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
-        val con = URL("https://www.gstatic.com/generate_204").openConnection(proxy) as HttpURLConnection
+        val con = URL(url).openConnection(proxy) as HttpURLConnection
         con.connectTimeout = timeoutMs
         con.readTimeout = timeoutMs
         con.instanceFollowRedirects = false
@@ -490,6 +497,29 @@ object PingTest {
     } catch (_: Throwable) {
         -1
     }
+
+    /**
+     * Deadline-bounded TCP ping used by the batch test. The plain Socket path
+     * above resolves DNS inside InetSocketAddress with NO timeout — a blocked
+     * or poisoned resolver (the norm for filtered server domains) can hang a
+     * single server for 15–30 s, which is why "test all pings" used to take
+     * forever. Here DNS and connect run on Dispatchers.IO behind a hard
+     * withTimeoutOrNull deadline; a stuck lookup is abandoned (-1) instead of
+     * stalling the whole batch. Never blocks longer than timeoutMs + 1.5 s.
+     */
+    suspend fun tcpBounded(host: String, port: Int, timeoutMs: Int = 4000): Long =
+        withTimeoutOrNull(timeoutMs + 1500L) {
+            val addr = withContext(Dispatchers.IO) {
+                try { java.net.InetAddress.getByName(host) } catch (_: Throwable) { null }
+            } ?: return@withTimeoutOrNull -1L
+            withContext(Dispatchers.IO) {
+                val start = System.currentTimeMillis()
+                try {
+                    Socket().use { it.connect(InetSocketAddress(addr, port), timeoutMs) }
+                    System.currentTimeMillis() - start
+                } catch (_: Throwable) { -1L }
+            }
+        } ?: -1L
 }
 
 // ---------------------------------------------------------------------------

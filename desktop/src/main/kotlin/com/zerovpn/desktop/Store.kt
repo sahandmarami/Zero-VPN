@@ -53,7 +53,7 @@ data class DataFile(
 
 enum class ConnStatus { DISCONNECTED, CONNECTING, CONNECTED }
 
-const val APP_VERSION = "1.5.5"
+const val APP_VERSION = "1.5.6"
 
 /**
  * Session stats measured from real ping tests of the current server —
@@ -301,11 +301,12 @@ object Store {
 
     val subscriptions get() = data.subscriptions
 
+    /** ms > 0 = real delay; ms <= 0 = failed/timeout — recorded as -1 so a
+     *  stale number from an earlier test never survives a dead server
+     *  (previously failures were silently skipped, keeping bogus results). */
     fun recordPing(id: String, ms: Long) {
-        if (ms > 0) {
-            pingMap[id] = ms
-            if (id == selectedId) ping = ms
-        }
+        pingMap[id] = if (ms > 0) ms else -1
+        if (id == selectedId) ping = ms.takeIf { it > 0 }
     }
 }
 

@@ -65,7 +65,10 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.cos
@@ -121,7 +124,14 @@ object Connector {
             }
             Store.status = ConnStatus.CONNECTED
             Store.connectedSince = System.currentTimeMillis()
-            val ms = withContext(Dispatchers.IO) { PingTest.viaSocks(Store.socksPort) }
+            var ms = withContext(Dispatchers.IO) { PingTest.viaSocks(Store.socksPort) }
+            if (ms < 0) {
+                // gstatic is sometimes unreachable through a working tunnel —
+                // one cloudflare fallback attempt before declaring failure.
+                ms = withContext(Dispatchers.IO) {
+                    PingTest.viaSocks(Store.socksPort, timeoutMs = 5000, url = "https://cp.cloudflare.com/generate_204")
+                }
+            }
             Store.recordPing(p.id, ms)
             ZeroStatsTracker.record(ms)
         }
@@ -160,19 +170,34 @@ object Connector {
         }
     }
 
-    /** TCP handshake ping of every server (offline behaviour of the test pill). */
+    /**
+     * TCP handshake ping of every server (offline behaviour of the test pill).
+     * Runs 8 servers in parallel, each bounded by PingTest.tcpBounded's hard
+     * deadline — the old sequential loop cost 3 s (or up to 30 s of hung DNS)
+     * per server, so a 40-server subscription took minutes and servers whose
+     * DNS was poisoned never got a result at all. Failed servers now record
+     * -1 so stale numbers from earlier tests clear instead of misleading.
+     */
     fun testAll() {
         if (Store.testing || Store.profiles.isEmpty()) return
         Store.testing = true
         Store.scope.launch {
             Store.busyMsg = "در حال تست پینگ همه سرورها…"
-            for (p in Store.profiles) {
-                val addr = ServerInfo.hostPort(p.link) ?: continue
-                val ms = withContext(Dispatchers.IO) { PingTest.tcp(addr.first, addr.second) }
-                if (ms > 0) Store.recordPing(p.id, ms)
+            val targets = Store.profiles.mapNotNull { p ->
+                ServerInfo.hostPort(p.link)?.let { Triple(p.id, it.first, it.second) }
             }
+            val sem = Semaphore(8)
+            targets.map { (id, host, port) ->
+                launch {
+                    sem.withPermit {
+                        val ms = PingTest.tcpBounded(host, port)
+                        Store.recordPing(id, ms)
+                    }
+                }
+            }.joinAll()
             Store.busyMsg = null
             Store.testing = false
+            Store.save()
             Store.toast("تست همه سرورها تمام شد")
         }
     }
@@ -1030,17 +1055,30 @@ private fun ZeroServerCard(
             }
         }
         pingMillis?.let {
-            Text(
-                text = "$it ms",
-                color = when {
-                    it <= 120 -> hc.pingGood
-                    it <= 400 -> hc.pingMid
-                    else -> hc.pingBad
-                },
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.width(8.dp))
+            when {
+                it > 0 -> {
+                    Text(
+                        text = "$it ms",
+                        color = when {
+                            it <= 120 -> hc.pingGood
+                            it <= 400 -> hc.pingMid
+                            else -> hc.pingBad
+                        },
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                else -> {
+                    Text(
+                        text = "تایم‌اوت",
+                        color = hc.pingBad,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+            }
         }
         Icon(
             imageVector = ZeroIcons.chevron,

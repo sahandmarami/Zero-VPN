@@ -659,9 +659,13 @@ private fun ServerRow(
                 Spacer(Modifier.weight(1f))
                 val ms = Store.pingMap[profile.id]
                 Text(
-                    text = if (ms != null && ms > 0) "$ms ms" else "",
+                    text = when {
+                        ms == null -> ""
+                        ms > 0 -> "$ms ms"
+                        else -> "تایم‌اوت"
+                    },
                     fontSize = 12.sp,
-                    color = pingColor(ms) ?: hc.textSecondary,
+                    color = if (ms != null && ms > 0) pingColor(ms) ?: hc.textSecondary else hc.pingBad,
                     maxLines = 1
                 )
             }
