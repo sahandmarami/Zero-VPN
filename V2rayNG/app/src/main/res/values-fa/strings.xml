@@ -23,12 +23,6 @@
     <string name="zero_no_server">هیچ سروری انتخاب نشده</string>
     <string name="zero_open_locations">برای انتخاب سرور بزنید</string>
     <!-- Zero VPN launch loading screen -->
-    <string name="zero_splash_checking">بررسی به‌روزرسانی از منبع اصلی…</string>
-    <string name="zero_splash_downloading">در حال دانلود به‌روزرسانی…</string>
-    <string name="zero_splash_ready">در حال باز شدن زیرو وی‌پی‌ان…</string>
-    <string name="zero_splash_version">نسخه %1$s</string>
-    <string name="zero_splash_core_ok">هسته Xray نسخه %1$s — به‌روز است</string>
-    <string name="zero_splash_core_old">هسته Xray نسخه %1$s — هسته جدیدتر موجود است</string>
     <string name="zero_install_update">نصب به‌روزرسانی</string>
     <!-- Zero VPN settings tab -->
     <string name="zero_set_personalize">شخصی‌سازی</string>
@@ -40,6 +34,7 @@
     <string name="zero_core_version">هسته Xray</string>
     <string name="zero_core_version_value">نسخه %1$s (با آپدیت برنامه به‌روز می‌شود)</string>
     <string name="zero_core_version_unknown">درون برنامه</string>
+    <string name="zero_update_downloaded">نسخه جدید دانلود شد — برای نصب، بنر آپدیت را بزنید</string>
     <string name="zero_set_per_app_hint">انتخاب برنامه‌هایی که از VPN عبور می‌کنند</string>
     <string name="zero_set_routing_hint">قوانین مسیریابی و دامنه‌ها</string>
     <!-- Zero VPN WireGuard -->

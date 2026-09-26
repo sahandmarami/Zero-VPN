@@ -63,15 +63,10 @@ import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.Utils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import kotlin.math.max
-
-private const val SPLASH_MIN_MILLIS = 1800L
-private const val SPLASH_FADE_MILLIS = 120L
 
 class MainActivity : HelperBaseComponentActivity() {
 
@@ -79,12 +74,10 @@ class MainActivity : HelperBaseComponentActivity() {
         MainViewModel.Factory(application, MainRepository(application as AngApplication))
     }
 
-    // Zero VPN: automatic update state (checked on every app launch).
+    // Zero VPN: automatic update state (checked silently on every app launch —
+    // no loading screen, the app opens right away).
     private val zeroAppUpdate = MutableStateFlow<Pair<String, String>?>(null)
     private val zeroCoreUpdate = MutableStateFlow<CoreUpdateManager.CoreUpdateResult?>(null)
-
-    // Zero VPN: launch loading screen (checks/downloads updates before opening).
-    private val zeroSplash = MutableStateFlow(ZeroSplashState())
     private var zeroUpdateApkFile: File? = null
 
     private val requestVpnPermission =
@@ -125,12 +118,12 @@ class MainActivity : HelperBaseComponentActivity() {
 
         checkAndRequestPermission(PermissionType.POST_NOTIFICATIONS) {}
 
-        // Zero VPN: launch loading screen — on every open it checks the
-        // official sources (Zero VPN release + official Xray-core release);
-        // if a newer build exists it is downloaded in-place (it carries the
-        // newest official core) and can be installed, then the app opens.
+        // Zero VPN: silent background update check on every launch — no loading
+        // screen. The app opens immediately while the official sources (Zero VPN
+        // release + official Xray-core release) are checked behind it; if a newer
+        // build exists it is downloaded in-place (it carries the newest official
+        // core) and one tap on the update banner installs it.
         lifecycleScope.launch {
-            val startedAt = System.currentTimeMillis()
             val autoUpdate = MmkvManager.decodeSettingsBool(AppConfig.PREF_AUTO_UPDATE, true)
 
             val appUpdateDeferred = lifecycleScope.async {
@@ -158,43 +151,40 @@ class MainActivity : HelperBaseComponentActivity() {
             }
             if (coreUpdate != null) {
                 zeroCoreUpdate.value = coreUpdate
-                zeroSplash.value = zeroSplash.value.copy(
-                    coreVersion = coreUpdate.currentVersion ?: coreUpdate.latestVersion,
-                    coreUpToDate = coreUpdate.currentVersion?.let { !coreUpdate.hasUpdate }
-                )
             }
 
-            // In-place download of the newest build (carries the newest core).
-            if (autoUpdate && appUpdate?.hasUpdate == true && !appUpdate.downloadUrl.isNullOrBlank()) {
-                zeroSplash.value = zeroSplash.value.copy(
-                    phase = ZeroSplashPhase.Downloading,
-                    downloadProgress = 0
-                )
-                try {
-                    val target = File(cacheDir, "zero_update_${appUpdate.latestVersion}.apk")
-                    val ok = HttpUtil.downloadToFile(
-                        UrlContentRequest(url = appUpdate.downloadUrl, timeout = 30_000),
-                        target
-                    ) { percent, _, _ ->
-                        zeroSplash.value = zeroSplash.value.copy(downloadProgress = percent)
+            // In-place background download of the newest build (carries the
+            // newest core). A finished download is cached per version so
+            // relaunches do not re-download until it gets installed.
+            if (autoUpdate && appUpdate?.hasUpdate == true && !appUpdate.latestVersion.isNullOrBlank()) {
+                val target = File(cacheDir, "zero_update_${appUpdate.latestVersion}.apk")
+                val cachedForSameVersion =
+                    MmkvManager.decodeSettingsString(AppConfig.PREF_ZERO_UPDATE_APK_VERSION) == appUpdate.latestVersion
+                if (cachedForSameVersion && target.exists() && target.length() > 0L) {
+                    zeroUpdateApkFile = target
+                } else if (!appUpdate.downloadUrl.isNullOrBlank()) {
+                    try {
+                        // downloadToFile is a blocking OkHttp call — keep it off the main thread.
+                        val ok = withContext(Dispatchers.IO) {
+                            if (target.exists()) target.delete()
+                            HttpUtil.downloadToFile(
+                                UrlContentRequest(url = appUpdate.downloadUrl, timeout = 30_000),
+                                target
+                            ) { _, _, _ -> }
+                        }
+                        if (ok && target.length() > 0L) {
+                            zeroUpdateApkFile = target
+                            MmkvManager.encodeSettings(AppConfig.PREF_ZERO_UPDATE_APK_VERSION, appUpdate.latestVersion)
+                            cacheDir.listFiles { f -> f.name.startsWith("zero_update_") && f != target }?.forEach { it.delete() }
+                            toastSuccess(R.string.zero_update_downloaded)
+                        } else {
+                            target.delete()
+                        }
+                    } catch (e: Exception) {
+                        LogUtil.e(AppConfig.TAG, "Update download failed", e)
                     }
-                    if (ok && target.length() > 0L) {
-                        zeroUpdateApkFile = target
-                        zeroSplash.value = zeroSplash.value.copy(downloadedVersion = appUpdate.latestVersion)
-                    } else {
-                        target.delete()
-                    }
-                } catch (e: Exception) {
-                    LogUtil.e(AppConfig.TAG, "Update download failed", e)
                 }
             }
-
-            // Keep the loading screen readable, then open the app.
-            val elapsed = System.currentTimeMillis() - startedAt
-            delay(max(0L, SPLASH_MIN_MILLIS - elapsed))
-            zeroSplash.value = zeroSplash.value.copy(phase = ZeroSplashPhase.Ready)
-            delay(SPLASH_FADE_MILLIS)
-            zeroSplash.value = zeroSplash.value.copy(visible = false)
 
             // Zero VPN: if the previous run ended in an uncaught crash, offer the
             // report for copying so problems can be diagnosed from user feedback.
@@ -225,7 +215,7 @@ class MainActivity : HelperBaseComponentActivity() {
         }
     }
 
-    /** Installs the update APK downloaded by the launch loading screen. */
+    /** Installs the update APK that was downloaded silently in the background. */
     private fun installZeroUpdate() {
         val apk = zeroUpdateApkFile ?: return
         if (!apk.exists()) return
@@ -258,7 +248,6 @@ class MainActivity : HelperBaseComponentActivity() {
         BackHandler { moveTaskToBack(false) }
         val appUpdate by zeroAppUpdate.collectAsState()
         val coreUpdate by zeroCoreUpdate.collectAsState()
-        val splash by zeroSplash.collectAsState()
         Box(modifier = Modifier.fillMaxSize()) {
             MainScreen(
                 mainViewModel = mainViewModel,
@@ -267,11 +256,17 @@ class MainActivity : HelperBaseComponentActivity() {
                 zeroAppUpdate = appUpdate,
                 zeroCoreUpdate = coreUpdate,
                 onOpenZeroUpdate = {
-                    val url = appUpdate?.second
-                    if (!url.isNullOrBlank()) {
-                        Utils.openUri(this@MainActivity, url)
+                    val apk = zeroUpdateApkFile
+                    if (apk != null && apk.exists()) {
+                        // The new build is already downloaded — go straight to the installer.
+                        installZeroUpdate()
                     } else {
-                        startActivity(Intent(this@MainActivity, CheckUpdateActivity::class.java))
+                        val url = appUpdate?.second
+                        if (!url.isNullOrBlank()) {
+                            Utils.openUri(this@MainActivity, url)
+                        } else {
+                            startActivity(Intent(this@MainActivity, CheckUpdateActivity::class.java))
+                        }
                     }
                 },
                 onDismissZeroUpdate = {
@@ -302,19 +297,6 @@ class MainActivity : HelperBaseComponentActivity() {
                 },
                 onNavigate = { route -> navigateTo(route) },
             )
-
-            // Launch loading screen sits above everything until it is done.
-            androidx.compose.animation.AnimatedVisibility(
-                visible = splash.visible,
-                enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(200)),
-                exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(320))
-            ) {
-                ZeroSplashScreen(
-                    state = splash,
-                    onInstallUpdate = { installZeroUpdate() },
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
         }
     }
 
