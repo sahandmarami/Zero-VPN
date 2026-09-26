@@ -186,7 +186,9 @@ object Connector {
             val targets = Store.profiles.mapNotNull { p ->
                 ServerInfo.hostPort(p.link)?.let { Triple(p.id, it.first, it.second) }
             }
-            val sem = Semaphore(8)
+            // 6 concurrent connects — enough for speed, gentle enough not to
+            // saturate a weak ADSL uplink into false timeouts.
+            val sem = Semaphore(6)
             targets.map { (id, host, port) ->
                 launch {
                     sem.withPermit {

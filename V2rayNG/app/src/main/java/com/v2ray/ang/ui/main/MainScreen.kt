@@ -230,7 +230,7 @@ fun MainScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(if (isDarkTheme) Color(0xFF070B11) else Color(0xFFF4F8FE))
+                .background(if (isDarkTheme) Color(0xFF070B11) else launchWash.base)
         ) {
             Canvas(modifier = Modifier.matchParentSize()) {
                 if (isDarkTheme) {
@@ -256,23 +256,24 @@ fun MainScreen(
                         )
                     )
                 } else {
+                    val wash = launchWash
                     drawRect(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color(0xFF35C6FF).copy(alpha = 0.30f), Color.Transparent),
+                            colors = listOf(wash.glowTop.copy(alpha = 0.30f), Color.Transparent),
                             center = Offset(size.width / 2f, size.height * 0.10f),
                             radius = size.width * 1.0f
                         )
                     )
                     drawRect(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color(0xFF4D8DFF).copy(alpha = 0.16f), Color.Transparent),
+                            colors = listOf(wash.glowLeft.copy(alpha = 0.16f), Color.Transparent),
                             center = Offset(size.width * 0.08f, size.height * 0.04f),
                             radius = size.width * 0.8f
                         )
                     )
                     drawRect(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color(0xFF5AA8FF).copy(alpha = 0.14f), Color.Transparent),
+                            colors = listOf(wash.glowBottom.copy(alpha = 0.14f), Color.Transparent),
                             center = Offset(size.width / 2f, size.height * 0.86f),
                             radius = size.width * 0.95f
                         )

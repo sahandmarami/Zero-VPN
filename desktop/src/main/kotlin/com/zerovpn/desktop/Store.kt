@@ -53,7 +53,7 @@ data class DataFile(
 
 enum class ConnStatus { DISCONNECTED, CONNECTING, CONNECTED }
 
-const val APP_VERSION = "1.5.6"
+const val APP_VERSION = "1.5.7"
 
 /**
  * Session stats measured from real ping tests of the current server —

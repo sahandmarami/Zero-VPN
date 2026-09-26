@@ -53,10 +53,11 @@ enum class ZeroTab { HOME, LOCATIONS, SETTINGS }
 private val NAV_BLOB_HEIGHT = 60.dp
 private val NAV_BAR_HEIGHT = 78.dp
 
-// Neon blue gradient shared by the capsules and the liquid neck so the
-// silhouettes blend seamlessly (same colors over the same Y span).
-private val BLOB_GRADIENT_TOP = Color(0xFF35C6FF)
-private val BLOB_GRADIENT_BOTTOM = Color(0xFF0084D4)
+// Capsule + liquid-neck gradient — follows the launch wash in the light
+// theme (azure / mint / rose), classic neon blue in the dark theme. The
+// silhouettes blend seamlessly because capsules and neck share the colors.
+private val BLOB_GRADIENT_TOP: Color get() = blobGradientTop
+private val BLOB_GRADIENT_BOTTOM: Color get() = blobGradientBottom
 
 private val NAV_BAR_BACKGROUND: Color get() = currentTheme.navBarBg
 private val NAV_INACTIVE: Color get() = currentTheme.navInactive

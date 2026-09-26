@@ -34,13 +34,22 @@ object ThemeState {
  * the dark text keeps full contrast; the neon-blue accent, cards and pills
  * are untouched so the brand look survives on every wash.
  */
-data class BgWash(val base: Color, val glowTop: Color, val glowLeft: Color, val glowBottom: Color)
+data class BgWash(
+    val base: Color,
+    val glowTop: Color,
+    val glowLeft: Color,
+    val glowBottom: Color,
+    val blobTop: Color,
+    val blobBottom: Color,
+)
 
 private val WASH_AZURE = BgWash(
     base = Color(0xFFF4F8FE),
     glowTop = Color(0xFF35C6FF),
     glowLeft = Color(0xFF4D8DFF),
     glowBottom = Color(0xFF5AA8FF),
+    blobTop = Color(0xFF35C6FF),
+    blobBottom = Color(0xFF0084D4),
 )
 
 private val WASH_MINT = BgWash(
@@ -48,6 +57,8 @@ private val WASH_MINT = BgWash(
     glowTop = Color(0xFF3BD9A4),
     glowLeft = Color(0xFF2FBF8F),
     glowBottom = Color(0xFF43CFA0),
+    blobTop = Color(0xFF3BE3A7),
+    blobBottom = Color(0xFF00A865),
 )
 
 private val WASH_ROSE = BgWash(
@@ -55,12 +66,25 @@ private val WASH_ROSE = BgWash(
     glowTop = Color(0xFFFF7A94),
     glowLeft = Color(0xFFFF8E7C),
     glowBottom = Color(0xFFFF9DA6),
+    blobTop = Color(0xFFFF7A94),
+    blobBottom = Color(0xFFD8274C),
 )
 
 /** Random pale wash for this launch — evaluated once per process. */
 val launchWash: BgWash by lazy {
     listOf(WASH_AZURE, WASH_MINT, WASH_ROSE).random()
 }
+
+/**
+ * Liquid-goo bottom-nav capsule gradient — follows the launch wash in the
+ * light theme (the jelly part the user pointed at), keeps the classic neon
+ * blue in the dark theme.
+ */
+val blobGradientTop: Color
+    get() = if (ThemeState.dark) Color(0xFF35C6FF) else launchWash.blobTop
+
+val blobGradientBottom: Color
+    get() = if (ThemeState.dark) Color(0xFF0084D4) else launchWash.blobBottom
 
 data class ZeroThemeColors(
     val bgBase: Color,

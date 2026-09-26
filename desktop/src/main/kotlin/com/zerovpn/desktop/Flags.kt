@@ -56,6 +56,14 @@ object FlagImages {
             byCode[code] = cached
             if (System.currentTimeMillis() - cachedFileTime(code) <= TTL_MILLIS) return
         }
+        // Bundled resource copy (v1.5.7): flagcdn used to be the only source
+        // and it is unreachable on some Iranian connections, so servers stuck
+        // on the ISO-code pill forever. Every ISO-3166 flag now ships inside
+        // the jar — instant, offline-correct, and flagcdn is just a refresh.
+        bundled(code)?.let {
+            byCode[code] = it
+            return
+        }
         Store.scope.launch {
             val bmp = withContext(Dispatchers.IO) { fetch(code) }
             if (bmp != null) {
@@ -65,6 +73,14 @@ object FlagImages {
                 failed.add(code)
             }
         }
+    }
+
+    /** Flag PNG shipped inside the jar under /flags/{cc}.png. */
+    private fun bundled(code: String): ImageBitmap? = try {
+        val stream = Store::class.java.classLoader.getResourceAsStream("flags/$code.png")
+        stream?.readBytes()?.let { decode(it) }
+    } catch (_: Throwable) {
+        null
     }
 
     private fun cachedFile(code: String): ImageBitmap? = try {

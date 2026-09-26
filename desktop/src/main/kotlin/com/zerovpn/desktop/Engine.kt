@@ -499,27 +499,87 @@ object PingTest {
     }
 
     /**
-     * Deadline-bounded TCP ping used by the batch test. The plain Socket path
-     * above resolves DNS inside InetSocketAddress with NO timeout — a blocked
-     * or poisoned resolver (the norm for filtered server domains) can hang a
-     * single server for 15–30 s, which is why "test all pings" used to take
-     * forever. Here DNS and connect run on Dispatchers.IO behind a hard
-     * withTimeoutOrNull deadline; a stuck lookup is abandoned (-1) instead of
-     * stalling the whole batch. Never blocks longer than timeoutMs + 1.5 s.
+     * Deadline-bounded TCP ping used by the batch test. Hardened against the
+     * "some servers time out on Windows but ping fine on Android" report:
+     *
+     * 1. ALL resolved addresses are tried, IPv4 first — the plain path used
+     *    getByName, which on v6-capable Windows boxes happily returns an AAAA
+     *    address whose routing is broken; the socket then hangs on a dead v6
+     *    route and the whole ping reports timeout even though the v4 address
+     *    is perfectly reachable (Android's resolver typically answers with
+     *    the v4 address, which is exactly why the phone worked).
+     * 2. When the system resolver returns nothing at all (poisoned/dead ISP
+     *    DNS — common for filtered server domains), a DNS-over-HTTPS JSON
+     *    lookup (Google → Cloudflare) provides a second resolution path.
+     * 3. Every step runs behind a hard withTimeoutOrNull deadline; a stuck
+     *    connect or lookup is abandoned (-1) and can never stall the batch.
+     * Never blocks longer than timeoutMs + 2.5 s per server.
      */
-    suspend fun tcpBounded(host: String, port: Int, timeoutMs: Int = 4000): Long =
-        withTimeoutOrNull(timeoutMs + 1500L) {
-            val addr = withContext(Dispatchers.IO) {
-                try { java.net.InetAddress.getByName(host) } catch (_: Throwable) { null }
-            } ?: return@withTimeoutOrNull -1L
-            withContext(Dispatchers.IO) {
-                val start = System.currentTimeMillis()
-                try {
-                    Socket().use { it.connect(InetSocketAddress(addr, port), timeoutMs) }
-                    System.currentTimeMillis() - start
-                } catch (_: Throwable) { -1L }
+    suspend fun tcpBounded(host: String, port: Int, timeoutMs: Int = 5000): Long =
+        withTimeoutOrNull(timeoutMs + 2500L) {
+            var addrs = withContext(Dispatchers.IO) { resolveAll(host) }
+            if (addrs.isEmpty()) {
+                addrs = withContext(Dispatchers.IO) { dohResolve(host) }
             }
+            if (addrs.isEmpty()) return@withTimeoutOrNull -1L
+            // IPv4 first — dead v6 routes are the #1 false-timeout cause.
+            val ordered = addrs.filter { it is java.net.Inet4Address } +
+                    addrs.filterNot { it is java.net.Inet4Address }
+            for (addr in ordered) {
+                val ms = withTimeoutOrNull(timeoutMs.toLong()) {
+                    val start = System.currentTimeMillis()
+                    try {
+                        Socket().use { it.connect(InetSocketAddress(addr, port), timeoutMs) }
+                        System.currentTimeMillis() - start
+                    } catch (_: Throwable) { -1L }
+                } ?: -1L
+                if (ms > 0) return@withTimeoutOrNull ms
+            }
+            -1L
         } ?: -1L
+
+    private fun resolveAll(host: String): List<java.net.InetAddress> = try {
+        java.net.InetAddress.getAllByName(host).toList()
+    } catch (_: Throwable) {
+        emptyList()
+    }
+
+    /** Best-effort DNS-over-HTTPS (JSON) — only used when system DNS fails. */
+    private fun dohResolve(host: String): List<java.net.InetAddress> {
+        val q = java.net.URLEncoder.encode(host, "UTF-8")
+        val endpoints = listOf(
+            "https://dns.google/resolve?name=$q&type=A",
+            "https://cloudflare-dns.com/dns-query?name=$q&type=A",
+        )
+        for (url in endpoints) {
+            try {
+                val body = viaSocksDohGet(url) ?: continue
+                val answers = Regex("\"data\"\\s*:\\s*\"(\\d{1,3}(?:\\.\\d{1,3}){3})\"")
+                    .findAll(body).map { it.groupValues[1] }.toList()
+                val ips = answers.mapNotNull {
+                    runCatching { java.net.InetAddress.getByName(it) }.getOrNull()
+                }
+                if (ips.isNotEmpty()) return ips
+            } catch (_: Throwable) { }
+        }
+        return emptyList()
+    }
+
+    private fun viaSocksDohGet(url: String): String? = try {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = 3500
+        conn.readTimeout = 3500
+        conn.setRequestProperty("Accept", "application/dns-json")
+        conn.setRequestProperty("User-Agent", "ZeroVPN/$APP_VERSION")
+        try {
+            if (conn.responseCode !in 200..299) null
+            else conn.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+        } finally {
+            conn.disconnect()
+        }
+    } catch (_: Throwable) {
+        null
+    }
 }
 
 // ---------------------------------------------------------------------------

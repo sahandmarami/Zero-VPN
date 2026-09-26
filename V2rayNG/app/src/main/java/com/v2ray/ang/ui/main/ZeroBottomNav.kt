@@ -79,6 +79,10 @@ fun ZeroBottomNav(
 ) {
     val barBackground = if (isDarkTheme) Color(0xE60B1018) else Color(0xF2FFFFFF)
     val inactiveColor = if (isDarkTheme) Color(0xFF7C8CA6) else Color(0xFF5A6B85)
+    // The jelly capsules follow the launch wash (azure / mint / rose) in the
+    // light theme; dark keeps the classic neon blue.
+    val blobTop = if (isDarkTheme) BLOB_GRADIENT_TOP else launchWash.blobTop
+    val blobBottom = if (isDarkTheme) BLOB_GRADIENT_BOTTOM else launchWash.blobBottom
     val activeIndex = when (selectedTab) {
         ZeroBottomTab.HOME -> 0
         ZeroBottomTab.LOCATIONS -> 1
@@ -127,13 +131,15 @@ fun ZeroBottomNav(
                     trailX = trailX.toPx(),
                     blobWidth = blobWidth.toPx(),
                     barHeightPx = NAV_BAR_HEIGHT.toPx(),
-                    blobHeightPx = NAV_BLOB_HEIGHT.toPx()
+                    blobHeightPx = NAV_BLOB_HEIGHT.toPx(),
+                    topColor = blobTop,
+                    bottomColor = blobBottom
                 )
             }
 
             // --- Capsule blobs (opaque, hardware anti-aliased) --------------
-            NavBlob(offsetX = trailX, blobWidth = blobWidth)
-            NavBlob(offsetX = leadX, blobWidth = blobWidth)
+            NavBlob(offsetX = trailX, blobWidth = blobWidth, topColor = blobTop, bottomColor = blobBottom)
+            NavBlob(offsetX = leadX, blobWidth = blobWidth, topColor = blobTop, bottomColor = blobBottom)
 
             // --- Crisp content layer ------------------------------------------
             // The content row occupies the exact vertical span of the capsules
@@ -176,9 +182,9 @@ fun ZeroBottomNav(
     }
 }
 
-/** One gooey liquid capsule — neon-blue gradient (پررنگ → کم‌رنگی). */
+/** One gooey liquid capsule — wash-colored gradient (پررنگ → کم‌رنگی). */
 @Composable
-private fun NavBlob(offsetX: Dp, blobWidth: Dp) {
+private fun NavBlob(offsetX: Dp, blobWidth: Dp, topColor: Color, bottomColor: Color) {
     Box(
         modifier = Modifier
             .offset(
@@ -189,7 +195,7 @@ private fun NavBlob(offsetX: Dp, blobWidth: Dp) {
             .height(NAV_BLOB_HEIGHT)
             .background(
                 brush = Brush.verticalGradient(
-                    listOf(BLOB_GRADIENT_TOP, BLOB_GRADIENT_BOTTOM)
+                    listOf(topColor, bottomColor)
                 ),
                 shape = RoundedCornerShape(NAV_BLOB_HEIGHT / 2)
             )
@@ -221,7 +227,9 @@ private fun DrawScope.drawGooNeck(
     trailX: Float,
     blobWidth: Float,
     barHeightPx: Float,
-    blobHeightPx: Float
+    blobHeightPx: Float,
+    topColor: Color,
+    bottomColor: Color
 ) {
     val r = blobHeightPx / 2f
     val cy = barHeightPx / 2f
@@ -285,7 +293,7 @@ private fun DrawScope.drawGooNeck(
     drawPath(
         path = path,
         brush = Brush.verticalGradient(
-            colors = listOf(BLOB_GRADIENT_TOP, BLOB_GRADIENT_BOTTOM),
+            colors = listOf(topColor, bottomColor),
             startY = blobTop,
             endY = blobTop + blobHeightPx
         ),
