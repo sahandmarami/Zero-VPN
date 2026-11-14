@@ -61,7 +61,31 @@ data class DataFile(
 
 enum class ConnStatus { DISCONNECTED, CONNECTING, CONNECTED }
 
-const val APP_VERSION = "2.0.0"
+const val APP_VERSION = "2.0.1"
+
+/**
+ * Posts an observable-state write onto the EDT — always DEFERRED, never
+ * synchronous. Even when the caller is already on the EDT (composable bodies
+ * run on it INSIDE the composition's own snapshot), the block is queued to run
+ * in a LATER EDT event, after the running composition applied.
+ *
+ * Why this exists (v2.0.1 — the "Unsupported concurrent change during
+ * composition" crash when opening the Servers screen):
+ *
+ *   Compose Desktop aborts a composition with
+ *   "Unsupported concurrent change during composition" when its snapshot
+ *   fails to apply — which happens if the SAME state object was written by
+ *   the composition AND, while that composition was running, from somewhere
+ *   else (another thread or another snapshot). v2.0.0 still had exactly that
+ *   pair on FlagImages.byCode: ZeroFlag -> ensure() wrote the map directly
+ *   from composable bodies (composition side), while the flag fetch fallback
+ *   wrote it from Dispatchers.IO (outside). Both removed here: every write to
+ *   a snapshot map (byCode / byHost / pingMap) now goes through this helper —
+ *   one writer (EDT), always outside the composition phase.
+ */
+fun postStateWrite(block: () -> Unit) {
+    javax.swing.SwingUtilities.invokeLater(block)
+}
 
 /**
  * Dispatches blocks on the AWT Event Dispatch Thread — the thread that runs
@@ -80,8 +104,8 @@ val EdtDispatcher: CoroutineDispatcher = object : CoroutineDispatcher() {
 // ---------------------------------------------------------------------------
 // Store — the single source of truth.
 //
-// THREADING CONTRACT (v2.0.0 — the "Unsupported concurrent change during
-// composition" crash fix):
+// THREADING CONTRACT (v2.0.0, tightened in v2.0.1 — the "Unsupported
+// concurrent change during composition" crash fix):
 //
 //   * Compose Desktop runs composition on the AWT Event Dispatch Thread.
 //   * EVERY write to the observable states below happens on Main (EDT) —
@@ -94,8 +118,18 @@ val EdtDispatcher: CoroutineDispatcher = object : CoroutineDispatcher() {
 //     body, racing the IO coroutines that also wrote Store — Compose threw
 //     "Unsupported concurrent change during composition" and the app became
 //     unusable).
+//   * v2.0.1: writes that may be issued from composable bodies or IO worker
+//     threads go through [postStateWrite] — a DEFERRED EDT post (never runs
+//     inline, even on the EDT), so a write can never land inside a running
+//     composition. This closes the v2.0.0 leftover: FlagImages.byCode was
+//     still written by composable bodies (disk-cache/bundled paths) while
+//     its network fallback wrote the same map from IO — the exact conflict
+//     Compose aborts compositions for, hitting everyone who opened the
+//     Servers screen. Store.pingMap (testAll) and GeoLookup.byHost
+//     (ensureLookup) got the same treatment.
 //
-// With one-writer-thread discipline this whole crash class is gone.
+// With one-writer-thread discipline and deferred posts this whole crash
+// class is gone.
 // ---------------------------------------------------------------------------
 object Store {
 
@@ -321,10 +355,14 @@ object Store {
     val subscriptions get() = data.subscriptions
 
     /** ms > 0 = real delay; ms <= 0 = failed/timeout — recorded as -1 so a
-     *  stale number from an earlier test never survives a dead server. */
+     *  stale number from an earlier test never survives a dead server.
+     *  (v2.0.1: posted to the EDT — testAll used to call this from IO worker
+     *  threads, a leftover violation of the Main-thread state contract.) */
     fun recordPing(id: String, ms: Long) {
-        pingMap[id] = if (ms > 0) ms else -1
-        if (id == selectedId) ping = ms.takeIf { it > 0 }
+        postStateWrite {
+            pingMap[id] = if (ms > 0) ms else -1
+            if (id == selectedId) ping = ms.takeIf { it > 0 }
+        }
     }
 }
 

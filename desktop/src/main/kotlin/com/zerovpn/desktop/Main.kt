@@ -177,6 +177,38 @@ fun exitApplication() {
 }
 
 fun main() {
+    // Crash diagnostics (v2.0.1): the compose-desktop default handler shows a
+    // dead-end "Error" dialog and leaves nothing to debug from. Append the
+    // full trace to %APPDATA%/ZeroVPN/crash.log so a user screenshot of the
+    // log can pinpoint the failure — and keep the app process alive.
+    Thread.setDefaultUncaughtExceptionHandler { thread, e ->
+        try {
+            val f = File(Store.dataDir, "crash.log")
+            f.appendText(
+                buildString {
+                    append("----- crash @ ").append(java.text.SimpleDateFormat(
+                        "yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()
+                    ).format(java.util.Date())).append(" (thread: ").append(thread.name).append(") -----\n")
+                    append(e.toString()).append('\n')
+                    e.stackTrace.forEach { append("    at $it\n") }
+                    var cause = e.cause
+                    var depth = 0
+                    while (cause != null && depth++ < 8) {
+                        append("Caused by: ").append(cause.toString()).append('\n')
+                        cause.stackTrace.take(20).forEach { append("    at $it\n") }
+                        cause = cause.cause
+                    }
+                    append('\n')
+                }
+            )
+        } catch (_: Throwable) { }
+        try {
+            javax.swing.SwingUtilities.invokeLater {
+                Store.toast("یک خطای داخلی رخ داد — crash.log در پوشه داده‌ها ثبت شد")
+            }
+        } catch (_: Throwable) { }
+    }
+
     Store.load()
 
     if (!acquireInstanceLock()) {

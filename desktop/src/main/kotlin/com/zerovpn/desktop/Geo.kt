@@ -36,8 +36,12 @@ object GeoLookup {
     private val sessionCache = ConcurrentHashMap<String, ServerGeo?>()
     private val failedHosts = ConcurrentHashMap.newKeySet<String>()
 
-    /** host -> geo, observed by the UI (snapshot state map — writes happen
-     *  only from IO coroutines, never during composition). */
+    /** Hosts with an in-flight lookup — dedupes launches (plain set, not state). */
+    private val lookingUp = ConcurrentHashMap.newKeySet<String>()
+
+    /** host -> geo, observed by the UI (snapshot state map — every write is
+     *  posted to the EDT through [postStateWrite], never during composition
+     *  and never from an IO worker thread — v2.0.1 crash-class fix). */
     val byHost = mutableStateMapOf<String, ServerGeo>()
 
     private fun cacheFile(): File = File(Store.dataDir, "geo_cache.json")
@@ -51,7 +55,7 @@ object GeoLookup {
             map.forEach { (host, geo) ->
                 if (now - geo.ts <= TTL_MILLIS) {
                     sessionCache[host] = geo
-                    geo.let { byHost[host] = it }
+                    if (geo != null) postStateWrite { byHost[host] = geo }
                 }
             }
         } catch (_: Throwable) { }
@@ -65,19 +69,30 @@ object GeoLookup {
         } catch (_: Throwable) { }
     }
 
-    /** Kicks off (or reuses) a background lookup for the given host. */
+    /** Kicks off (or reuses) a background lookup for the given host.
+     *  v2.0.1: ensureLookup was called both at startup and from the Servers
+     *  screen's LaunchedEffect; the cached fast-path used to write byHost
+     *  synchronously and the lookup path wrote it from Dispatchers.IO. All
+     *  writes now go through [postStateWrite] (deferred EDT), so a write can
+     *  never land inside a running composition — the "Unsupported concurrent
+     *  change during composition" crash class. */
     fun ensureLookup(host: String?) {
         val h = host?.trim() ?: return
         if (h.isEmpty() || isPrivateHost(h) || failedHosts.contains(h)) return
-        if (sessionCache.containsKey(h)) {
-            sessionCache[h]?.let { byHost[h] = it }
+        if (lookingUp.contains(h)) return
+        val cached = sessionCache[h]
+        if (cached != null) {
+            if (byHost[h] != cached) postStateWrite { byHost[h] = cached }
             return
         }
+        if (sessionCache.containsKey(h)) return // null-marked: failed this session
+        lookingUp.add(h)
         Store.io.launch {
             val geo = withContext(Dispatchers.IO) { lookupHost(h) }
+            lookingUp.remove(h)
             if (geo != null) {
                 sessionCache[h] = geo
-                byHost[h] = geo
+                postStateWrite { byHost[h] = geo }
                 saveCache()
             } else {
                 sessionCache[h] = null

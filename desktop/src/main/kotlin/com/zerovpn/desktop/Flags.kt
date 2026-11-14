@@ -38,41 +38,64 @@ import java.net.URL
  */
 object FlagImages {
 
-    private const val TTL_MILLIS = 30L * 24 * 60 * 60 * 1000 // one month
-
     /** cc (lowercase ISO) -> decoded bitmap, observed by the UI. */
     val byCode = mutableStateMapOf<String, ImageBitmap>()
     private val failed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
+    /** Codes with an in-flight resolve — dedupes launches between "started"
+     *  and "the deferred byCode write landed" (plain set, not state). */
+    private val pending = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     private fun flagsDir(): File = File(Store.dataDir, "flags").apply { mkdirs() }
 
-    /** Kicks off (or reuses) a background fetch for the given country code. */
+    // -----------------------------------------------------------------------
+    // v2.0.1 crash fix — "Unsupported concurrent change during composition":
+    // ZeroFlag (a composable) calls ensure() DURING COMPOSITION, and the old
+    // code then wrote byCode[code] directly (disk-cache and bundled paths)
+    // while the network fallback wrote the SAME map from an IO worker thread.
+    // A composition whose snapshot also modified byCode then failed to apply
+    // and Compose aborted with the error dialog — every time the Servers
+    // screen composed many flags at once. Now: ensure() NEVER writes state.
+    // Resolution (disk cache -> bundled resource -> network) runs on IO, and
+    // the single observable write is posted to the EDT, deferred — it can
+    // never land inside a running composition.
+    // -----------------------------------------------------------------------
+
+    /** Kicks off (or reuses) a background resolve for the given country code. */
     fun ensure(cc: String?) {
         val code = cc?.trim()?.lowercase()?.takeIf { Regex("^[a-z]{2}$").matches(it) } ?: return
-        if (byCode.containsKey(code) || failed.contains(code)) return
-        // Serve from the disk cache first, then refresh in the background.
-        val cached = cachedFile(code)
-        if (cached != null) {
-            byCode[code] = cached
-            if (System.currentTimeMillis() - cachedFileTime(code) <= TTL_MILLIS) return
-        }
-        // Bundled resource copy (v1.5.7): flagcdn used to be the only source
-        // and it is unreachable on some Iranian connections, so servers stuck
-        // on the ISO-code pill forever. Every ISO-3166 flag now ships inside
-        // the jar — instant, offline-correct, and flagcdn is just a refresh.
-        bundled(code)?.let {
-            byCode[code] = it
-            return
-        }
+        if (byCode.containsKey(code) || failed.contains(code) || pending.contains(code)) return
+        pending.add(code)
         Store.io.launch {
-            val bmp = withContext(Dispatchers.IO) { fetch(code) }
+            val bmp = withContext(Dispatchers.IO) { resolve(code) }
+            pending.remove(code)
             if (bmp != null) {
-                byCode[code] = bmp
-                failed.remove(code)
-            } else if (!byCode.containsKey(code)) {
+                postStateWrite { byCode[code] = bmp }
+            } else {
                 failed.add(code)
             }
         }
+    }
+
+    /** Where a flag bitmap comes from, in priority order. IO only. */
+    private fun resolve(code: String): ImageBitmap? {
+        // 1) Persistent disk cache from an earlier fetch (any age — better
+        //    than the code pill; the TTL refresh happens via flagcdn below).
+        cachedFile(code)?.let { return it }
+        // 2) Bundled resource copy (v1.5.7): flagcdn used to be the only
+        //    source and it is unreachable on some Iranian connections, so
+        //    servers stuck on the ISO-code pill forever. Every ISO-3166 flag
+        //    ships inside the jar — instant, offline-correct.
+        bundled(code)?.let { return it }
+        // 3) flagcdn refresh (codes missing from the bundle, e.g. "eu").
+        return fetch(code)
+    }
+
+    /** SelfTest hook: bundled flag resources must be resolvable offline. */
+    internal fun bundledAccessible(code: String): Boolean = try {
+        Store::class.java.classLoader.getResourceAsStream("flags/$code.png") != null
+    } catch (_: Throwable) {
+        false
     }
 
     /** Flag PNG shipped inside the jar under /flags/{cc}.png. */
@@ -88,12 +111,6 @@ object FlagImages {
         if (f.isFile && f.length() > 0) decode(f.readBytes()) else null
     } catch (_: Throwable) {
         null
-    }
-
-    private fun cachedFileTime(code: String): Long = try {
-        File(flagsDir(), "$code.png").lastModified()
-    } catch (_: Throwable) {
-        0L
     }
 
     private fun fetch(code: String): ImageBitmap? {

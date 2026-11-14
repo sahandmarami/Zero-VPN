@@ -128,7 +128,28 @@ fun main(args: Array<String>) {
     println(if (trackerOk) "OK    TrafficTracker delta folding" else "FAIL  TrafficTracker: up=${TrafficTracker.upSpeed}/${TrafficTracker.upTotal} down=${TrafficTracker.downSpeed}/${TrafficTracker.downTotal}")
     if (trackerOk) ok++
 
-    val expected = samples.size + 9
+    // 9) v2.0.1: recordPing is a DEFERRED EDT write (the "Unsupported
+    //    concurrent change during composition" crash-class fix) — the ping
+    //    lands via invokeLater on the AWT EDT, never inline from the caller.
+    Store.recordPing("selftest-deferred-id", 123)
+    var landed = false
+    val deadline = System.currentTimeMillis() + 3000
+    while (System.currentTimeMillis() < deadline && !landed) {
+        Thread.sleep(50)
+        landed = Store.pingMap["selftest-deferred-id"] == 123L
+    }
+    println(if (landed) "OK    recordPing deferred EDT write lands" else "FAIL  recordPing deferred write (timeout)")
+    if (landed) ok++
+
+    // 10) v2.0.1: flag resolution — a bundled ISO code resolves from resources
+    //     without touching the network (the path that used to write byCode
+    //     during composition; it must now only produce the bitmap, and the
+    //     observable write is deferred elsewhere).
+    val bundledOk = FlagImages.bundledAccessible("de")
+    println(if (bundledOk) "OK    bundled flag resource resolvable" else "FAIL  bundled flag resource")
+    if (bundledOk) ok++
+
+    val expected = samples.size + 11
     println(
         if (ok == expected && full != null) "SELFTEST PASS ($ok/$expected)"
         else "SELFTEST FAIL ($ok expected $expected)"
