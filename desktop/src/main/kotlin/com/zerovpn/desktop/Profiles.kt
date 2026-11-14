@@ -2,7 +2,6 @@ package com.zerovpn.desktop
 
 import java.io.File
 import java.net.HttpURLConnection
-import java.net.URI
 import java.net.URL
 import java.net.URLDecoder
 import java.util.Base64
@@ -10,6 +9,18 @@ import java.util.UUID
 
 data class ParsedLink(val name: String, val proto: String, val link: String)
 
+/** Result of a subscription fetch — applied to the Store on Main. */
+data class SubFetchResult(
+    val url: String,
+    val profiles: List<ProfileRec>,
+    val info: SubRec?,
+    val error: String? = null,
+)
+
+/**
+ * Pure data operations — no Store/state writes here. Callers run these on
+ * Dispatchers.IO and post the results to the Store on Main.
+ */
 object Profiles {
 
     private val supported = setOf("vmess", "vless", "trojan", "ss")
@@ -75,8 +86,6 @@ object Profiles {
                 .firstOrNull { it.key?.equals("subscription-userinfo", true) == true }
                 ?.value?.joinToString(";")
             if (!raw.isNullOrBlank()) {
-                // Standard header: "upload=..; download=..; total=..; expire=.."
-                // (same parsing as the Android app — values use '=', not ':').
                 val map = raw.split(";").mapNotNull {
                     val p = it.split("=", limit = 2)
                     if (p.size == 2) p[0].trim().lowercase() to p[1].trim().toLongOrNull() else null
@@ -95,132 +104,41 @@ object Profiles {
 
     fun fetch(url: String, timeoutMs: Int = 15000): String = fetchWithInfo(url, timeoutMs).first
 
-    // --- High level operations ----------------------------------------------
-    fun updateSubscriptions(): Pair<Int, String> {
-        val subs = Store.subscriptions
-        if (subs.isEmpty()) return 0 to "هیچ اشتراکی ثبت نشده"
-        var added = 0
-        var err: String? = null
-        for (sub in subs) {
-            try {
-                Store.busyMsg = "در حال دریافت: ${sub.name}"
-                val (body, info) = fetchWithInfo(sub.url)
-                val links = parseBody(body)
-                val fresh = links.map { p ->
-                    ProfileRec(
-                        id = subId(sub.url, p.link),
-                        name = p.name,
-                        proto = p.proto,
-                        link = p.link,
-                        sub = sub.url,
-                    )
-                }.distinctBy { it.id }
-                synchronized(Store) {
-                    // Replace ONLY this subscription's profiles — every other
-                    // group (subs + manual) stays untouched.
-                    val others = Store.profiles.filter { it.sub != sub.url }
-                    Store.data = Store.data.copy(profiles = others + fresh)
-                    Store.data = Store.data.copy(
-                        subscriptions = Store.subscriptions.map {
-                            if (it.url == sub.url)
-                                it.copy(
-                                    lastFetch = System.currentTimeMillis(),
-                                    used = info?.used ?: it.used,
-                                    total = info?.total ?: it.total,
-                                    expire = info?.expire ?: it.expire,
-                                )
-                            else it
-                        }
-                    )
-                    if ((Store.selectedId == null ||
-                            Store.profiles.none { it.id == Store.selectedId }) &&
-                        Store.profiles.isNotEmpty()
-                    ) {
-                        Store.data = Store.data.copy(selected = Store.profiles.first().id)
-                    }
-                    Store.save()
-                }
-                added += fresh.size
-            } catch (t: Throwable) {
-                err = t.message ?: t.javaClass.simpleName
-            }
-        }
-        Store.busyMsg = null
-        return if (err != null && added == 0) 0 to "خطا در دریافت: $err"
-        else added to "$added سرور دریافت شد"
-    }
-
-    /** Refreshes ONE subscription (keeps other groups' profiles intact). */
-    fun refreshSingleSub(url: String): Pair<Int, String> {
-        val sub = Store.subscriptionFor(url) ?: return 0 to "اشتراک پیدا نشد"
-        return try {
-            Store.busyMsg = "در حال دریافت: ${sub.name}"
-            val (body, info) = fetchWithInfo(sub.url)
-            val links = parseBody(body)
-            val fresh = links.map { p ->
-                ProfileRec(
-                    id = subId(sub.url, p.link),
-                    name = p.name,
-                    proto = p.proto,
-                    link = p.link,
-                    sub = sub.url,
-                )
-            }.distinctBy { it.id }
-            synchronized(Store) {
-                val others = Store.profiles.filter { it.sub != sub.url }
-                Store.data = Store.data.copy(profiles = others + fresh)
-                Store.data = Store.data.copy(
-                    subscriptions = Store.subscriptions.map {
-                        if (it.url == sub.url)
-                            it.copy(
-                                lastFetch = System.currentTimeMillis(),
-                                used = info?.used ?: it.used,
-                                total = info?.total ?: it.total,
-                                expire = info?.expire ?: it.expire,
-                            )
-                        else it
-                    }
-                )
-                if ((Store.selectedId == null ||
-                        Store.profiles.none { it.id == Store.selectedId }) &&
-                    Store.profiles.isNotEmpty()
-                ) {
-                    Store.data = Store.data.copy(selected = Store.profiles.first().id)
-                }
-                Store.save()
-            }
-            Store.busyMsg = null
-            fresh.size to "${fresh.size} سرور دریافت شد"
-        } catch (t: Throwable) {
-            Store.busyMsg = null
-            0 to "خطا در دریافت: ${t.message ?: t.javaClass.simpleName}"
-        }
-    }
-
-    fun importText(text: String): Int {
-        val links = parseBody(text)
-        var n = 0
-        for (p in links) {
-            Store.upsertProfile(
-                ProfileRec(
-                    id = stableId(p.link),
-                    name = p.name,
-                    proto = p.proto,
-                    link = p.link,
-                    sub = null,
-                )
+    // --- High level operations (pure — results applied by the caller) -------
+    fun fetchSub(url: String): SubFetchResult = try {
+        val (body, info) = fetchWithInfo(url)
+        val links = parseBody(body)
+        val fresh = links.map { p ->
+            ProfileRec(
+                id = subId(url, p.link),
+                name = p.name,
+                proto = p.proto,
+                link = p.link,
+                sub = url,
             )
-            n++
-        }
-        return n
+        }.distinctBy { it.id }
+        SubFetchResult(url = url, profiles = fresh, info = info)
+    } catch (t: Throwable) {
+        SubFetchResult(url = url, profiles = emptyList(), info = null,
+            error = t.message ?: t.javaClass.simpleName)
     }
+
+    fun importText(text: String): List<ProfileRec> =
+        parseBody(text).map { p ->
+            ProfileRec(
+                id = stableId(p.link),
+                name = p.name,
+                proto = p.proto,
+                link = p.link,
+                sub = null,
+            )
+        }
 
     fun stableId(link: String): String =
         UUID.nameUUIDFromBytes(link.toByteArray(Charsets.UTF_8)).toString()
 
     /** Unique id per (subscription, link): the same server link inside two
-     *  different subscriptions must be two independent rows, or selection
-     *  and list keys collide ("the app picks a server by itself"). */
+     *  different subscriptions must be two independent rows. */
     fun subId(subUrl: String, link: String): String =
         stableId(subUrl + "|" + link)
 

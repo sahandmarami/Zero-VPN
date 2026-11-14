@@ -64,7 +64,7 @@ object FlagImages {
             byCode[code] = it
             return
         }
-        Store.scope.launch {
+        Store.io.launch {
             val bmp = withContext(Dispatchers.IO) { fetch(code) }
             if (bmp != null) {
                 byCode[code] = bmp
@@ -174,12 +174,12 @@ fun ZeroFlag(
                     text = code,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = zeroHomeColors.accent
+                    color = currentTheme.accent
                 )
             }
         } else {
             // Fallback: ISO code chip (same as the Android "US" pill).
-            val hc = zeroHomeColors
+            val hc = currentTheme
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))

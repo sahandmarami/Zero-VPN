@@ -1,18 +1,11 @@
 package com.zerovpn.desktop
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Typography
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
-import androidx.compose.material3.Surface
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -24,29 +17,31 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import java.io.File
+import kotlinx.coroutines.launch
 import java.io.RandomAccessFile
+import java.net.ServerSocket
+import java.net.Socket
 import java.nio.channels.FileLock
 import javax.imageio.ImageIO
 import kotlin.system.exitProcess
 
 // ---------------------------------------------------------------------------
-// Zero VPN neon palette (matches the Android app) — theme surfaces live in
-// Theme.kt so the app can switch between the phone's light look and dark.
+// Zero VPN desktop v2 — clean rebuild. The v1.6.0 release shipped a real
+// crash ("Unsupported concurrent change during composition") caused by
+// writing Compose state during composition while IO coroutines wrote the
+// same states from background threads. v2.0.0 rebuilds the app around a
+// strict Main-thread state contract, a real desktop layout (sidebar), live
+// traffic stats through the core's local stats API, a core watchdog, and
+// proper single-instance handling that BRINGS THE RUNNING WINDOW TO FRONT
+// instead of popping a dead-end dialog.
 // ---------------------------------------------------------------------------
-val colorZeroNeon = Color(0xFF00A8F5)
-val colorZeroNeonSoft = Color(0xFF35C6FF)
-val colorZeroDeep = Color(0xFF0084D4)
-val colorZeroIdle = Color(0xFF3A4A61)
-val colorZeroTesting = Color(0xFFFFB020)
-val colorZeroFailure = Color(0xFFFF5470)
 
-/**
- * App font — B Nazanin (the classic Persian UI font, user-requested), loaded
- * straight from the bundled resources as bytes. Vazirmatn is kept as a
- * fallback in case the resource is ever missing. Letter-joining (Persian
- * shaping) comes from the font's own GSUB init/medi/fina tables, so no text
- * style may ever set a non-zero letterSpacing — it breaks Persian joining.
- */
+// ---------------------------------------------------------------------------
+// App font — B Nazanin (the classic Persian UI font, user-requested), loaded
+// straight from the bundled resources as bytes. Letter-joining (Persian
+// shaping) comes from the font's own GSUB tables, so no text style may ever
+// set a non-zero letterSpacing — it breaks Persian joining.
+// ---------------------------------------------------------------------------
 val zeroFontFamily: FontFamily by lazy {
     try {
         val cl = Store::class.java.classLoader
@@ -76,9 +71,9 @@ val zeroFontFamily: FontFamily by lazy {
 }
 
 /** Material3 typography with B Nazanin on every style (menus, text fields…). */
-val zeroTypography: Typography by lazy {
-    val d = Typography()
-    Typography(
+val zeroTypography: androidx.compose.material3.Typography by lazy {
+    val d = androidx.compose.material3.Typography()
+    androidx.compose.material3.Typography(
         displayLarge = d.displayLarge.copy(fontFamily = zeroFontFamily),
         displayMedium = d.displayMedium.copy(fontFamily = zeroFontFamily),
         displaySmall = d.displaySmall.copy(fontFamily = zeroFontFamily),
@@ -106,14 +101,18 @@ fun loadLogoPainter(): Painter? = try {
 }
 
 // ---------------------------------------------------------------------------
-// Single-instance guard — a held file lock in the data dir. Prevents the
-// classic double-launch mess: second instance steals the SOCKS port (core
-// start fails with "address already in use") and both windows fight over the
-// system-proxy registry keys.
+// Single-instance guard
+//   * file lock prevents a second full instance (data corruption / port fight)
+//   * a tiny loopback listener turns every double-launch into "show the
+//     already-running window" — the v1.6.0 dialog told users to hunt for a
+//     tray icon they could not find; v2.0.0 just resurfaces the window.
 // ---------------------------------------------------------------------------
+private const val IPC_PORT = 26851
+
 private object InstanceLock {
     var channel: RandomAccessFile? = null
     var lock: FileLock? = null
+    var server: ServerSocket? = null
 }
 
 private fun acquireInstanceLock(): Boolean = try {
@@ -132,11 +131,48 @@ private fun acquireInstanceLock(): Boolean = try {
     true // never block the app because of a lock-file hiccup
 }
 
+/** Notify the running instance to show its window; true if it answered. */
+private fun signalRunningInstance(): Boolean = try {
+    Socket("127.0.0.1", IPC_PORT).use { s ->
+        s.getOutputStream().write("SHOW\n".toByteArray())
+        s.getOutputStream().flush()
+        true
+    }
+} catch (_: Throwable) {
+    false
+}
+
+/** Loopback listener: another ZeroVPN.exe asked us to come to the front. */
+private fun startIpcListener(onShow: () -> Unit) {
+    try {
+        val server = ServerSocket(IPC_PORT, 4, java.net.InetAddress.getLoopbackAddress())
+        InstanceLock.server = server
+        Thread({
+            while (!server.isClosed) {
+                try {
+                    server.accept().use { client ->
+                        val buf = ByteArray(16)
+                        try { client.getInputStream().read(buf) } catch (_: Throwable) { }
+                        if (buf.decodeToString().contains("SHOW")) {
+                            javax.swing.SwingUtilities.invokeLater(onShow)
+                        }
+                    }
+                } catch (_: Throwable) {
+                    break
+                }
+            }
+        }, "ZeroVPN-IPC").isDaemon = true
+    } catch (_: Throwable) { }
+}
+
+/** No-op placeholder — the listener already runs from main(). */
+private fun startIpcListenerFallback() { }
+
 /** Full exit — core, system proxy, then the process. Used by tray + hooks. */
 fun exitApplication() {
     try { Engine.stop() } catch (_: Throwable) { }
     try { if (Store.isWindows) SysProxy.disable() } catch (_: Throwable) { }
-    try { Store.save() } catch (_: Throwable) { }
+    try { InstanceLock.server?.close() } catch (_: Throwable) { }
     exitProcess(0)
 }
 
@@ -144,14 +180,18 @@ fun main() {
     Store.load()
 
     if (!acquireInstanceLock()) {
-        try {
-            javax.swing.JOptionPane.showMessageDialog(
-                null,
-                "Zero VPN از قبل در حال اجراست — آیکون آن کنار ساعت (system tray) است.",
-                "Zero VPN",
-                javax.swing.JOptionPane.INFORMATION_MESSAGE
-            )
-        } catch (_: Throwable) { }
+        // Already running — resurface the existing window, fall back to the
+        // informational dialog only if the IPC handshake fails.
+        if (!signalRunningInstance()) {
+            try {
+                javax.swing.JOptionPane.showMessageDialog(
+                    null,
+                    "Zero VPN از قبل در حال اجراست — آیکون آن کنار ساعت (system tray) است.",
+                    "Zero VPN",
+                    javax.swing.JOptionPane.INFORMATION_MESSAGE
+                )
+            } catch (_: Throwable) { }
+        }
         exitProcess(0)
     }
 
@@ -165,8 +205,20 @@ fun main() {
         } catch (_: Throwable) { }
     })
 
+    // Core version probe (IO) — fills the sidebar + settings rows. Written
+    // via the Main-confined UI scope, never from a bare worker thread.
+    Store.io.launch {
+        val v = Engine.probeVersion()
+        if (v != null) Store.ui.launch { Store.coreVersion = v }
+    }
+
+    // Loopback IPC: a second launch resurfaces this window (before any
+    // composition — a one-time side effect, not a composition-time write).
+    startIpcListener { Store.windowVisible = true }
+
     application {
         val icon = remember { loadLogoPainter() }
+        val windowState = rememberWindowState(width = 1020.dp, height = 680.dp)
 
         // --- System tray — the command center when the window is closed ----
         if (icon != null) {
@@ -188,6 +240,8 @@ fun main() {
             )
         }
 
+        startIpcListenerFallback()
+
         Window(
             onCloseRequest = {
                 // X does not quit — the tunnel and tray icon stay alive
@@ -195,18 +249,24 @@ fun main() {
                 Store.windowVisible = false
             },
             visible = Store.windowVisible,
-            title = "Zero VPN",
+            title = "Zero VPN $APP_VERSION",
             icon = icon,
-            resizable = false,
-            state = rememberWindowState(width = 412.dp, height = 782.dp),
+            resizable = true,
+            state = windowState,
         ) {
-            Surface(modifier = androidx.compose.ui.Modifier.fillMaxSize()) {
+            // Min size keeps the sidebar layout intact; the window is now
+            // freely resizable (the fixed 412×782 phone window was part of
+            // the broken look users reported).
+            window.minimumSize = java.awt.Dimension(880, 600)
+            androidx.compose.material3.Surface(
+                modifier = androidx.compose.ui.Modifier.fillMaxSize()
+            ) {
                 ZeroApp()
             }
         }
 
         // v2rayNG-style boot behaviour: connect the last server on launch
-        androidx.compose.runtime.LaunchedEffect(Unit) {
+        LaunchedEffect(Unit) {
             if (Store.data.settings.autoConnect && Store.profiles.isNotEmpty() &&
                 Store.status == ConnStatus.DISCONNECTED
             ) {
@@ -214,25 +274,4 @@ fun main() {
             }
         }
     }
-}
-
-@Composable
-fun ZeroTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = if (ThemeState.dark) darkColorScheme(
-            primary = colorZeroNeon,
-            background = colorBgTop,
-            surface = colorCard,
-            onBackground = colorTextPrimary,
-            onSurface = colorTextPrimary,
-        ) else lightColorScheme(
-            primary = colorZeroDeep,
-            background = colorBgTop,
-            surface = colorCard,
-            onBackground = colorTextPrimary,
-            onSurface = colorTextPrimary,
-        ),
-        typography = zeroTypography,
-        content = content
-    )
 }

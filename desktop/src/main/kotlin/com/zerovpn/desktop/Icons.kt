@@ -183,4 +183,68 @@ object ZeroIcons {
                 "2,-0.9 2,-2 -0.9,-2 -2,-2z"
         )
     }
+
+    /** log / document (description) — the logs tab */
+    val logFile: ImageVector by lazy {
+        vec(
+            "ZeroLog",
+            "M14,2H6C4.9,2 4.01,2.9 4.01,4L4,20c0,1.1 0.89,2 2,2h12c1.1,0 2,-0.9 2,-2V8l-6,-6zM16,18H8v-2h8v2zM16,14H8v-2h8v2zM13,9V3.5L18.5,9H13z"
+        )
+    }
+
+    /** sort (swap_vert style) — sort-by-ping toolbar toggle */
+    val sort: ImageVector by lazy {
+        vec(
+            "ZeroSort",
+            "M8,20h3V4H8v16zM3,20h3V10H3v10zM13,20h3V8h-3v12zM18,20h3v-6h-3v6z"
+        )
+    }
+
+    /** speed / gauge — ping stat card */
+    val speed: ImageVector by lazy {
+        vec(
+            "ZeroSpeed",
+            "M20.38,8.57l-1.23,1.85a8,8 0,0 1,-0.22 7.58H5.07A8,8 0,0 1,15.58 6.85l1.85,-1.23A10,10 0,0 0,3.35 19a2,2 0,0 0,1.72 1h13.85a2,2 0,0 0,1.74 -1a10,10 0,0 0,-0.27 -10.44zM10.59,15.41a2,2 0,0 0,2.83 0l5.66,-8.49 -8.49,5.66a2,2 0,0 0,0 2.83z"
+        )
+    }
+
+    /** clock — uptime stat card */
+    val clock: ImageVector by lazy {
+        vec(
+            "ZeroClock",
+            "M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zM12,20c-4.42,0 -8,-3.58 -8,-8s3.58,-8 8,-8 8,3.58 8,8 -3.58,8 -8,8zM12.5,7H11v6l5.25,3.15 0.75,-1.23 -4.5,-2.67z"
+        )
+    }
+
+    /** upload arrow — uplink stat card */
+    val upload: ImageVector by lazy {
+        vec(
+            "ZeroUpload",
+            "M9,16h6v-6h4l-7,-7 -7,7h4v6zM5,18h14v2H5v-2z"
+        )
+    }
+
+    /** download arrow — downlink stat card */
+    val download: ImageVector by lazy {
+        vec(
+            "ZeroDownload",
+            "M19,9h-4V3H9v6H5l7,7 7,-7zM5,18v2h14v-2H5z"
+        )
+    }
+
+    /** wave — jitter stat card */
+    val wave: ImageVector by lazy {
+        vec(
+            "ZeroWave",
+            "M2,13c0,0 2.5,-2 6,-2c2.5,0 3.5,1 6,1c3.5,0 6,-2 6,-2l2,0.5C22,10.5 19.5,14 16,14c-2.5,0 -3.5,-1 -6,-1c-3.5,0 -6,2 -6,2L2,13zM2,17c0,0 2.5,-2 6,-2c2.5,0 3.5,1 6,1c3.5,0 6,-2 6,-2l2,0.5C22,14.5 19.5,18 16,18c-2.5,0 -3.5,-1 -6,-1c-3.5,0 -6,2 -6,2L2,17z"
+        )
+    }
+
+    /** shield — packet loss stat card */
+    val shield: ImageVector by lazy {
+        vec(
+            "ZeroShield",
+            "M12,1L3,5v6c0,5.55 3.84,10.74 9,12c5.16,-1.26 9,-6.45 9,-12V5L12,1zM12,11.99h7c-0.53,4.12 -3.28,7.79 -7,8.94V12H5V6.3l7,-3.11v8.8z"
+        )
+    }
 }

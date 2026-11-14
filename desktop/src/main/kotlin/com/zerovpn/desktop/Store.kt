@@ -4,15 +4,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
+import kotlin.coroutines.CoroutineContext
 
 @Serializable
 data class ProfileRec(
@@ -38,10 +41,13 @@ data class SubRec(
 data class SettingsRec(
     val socksPort: Int = 10808,
     val autoProxy: Boolean = true,
-    // "light" | "dark" — light matches the phone app the user compares against
+    // "light" | "dark"
     val theme: String = "light",
     // v2rayNG-style boot behaviour: connect the selected server at launch
     val autoConnect: Boolean = false,
+    // v2rayNG-style behaviour: selecting another server while connected
+    // restarts the tunnel with the new server — no manual disconnect needed.
+    val autoSwitch: Boolean = true,
 )
 
 @Serializable
@@ -55,60 +61,55 @@ data class DataFile(
 
 enum class ConnStatus { DISCONNECTED, CONNECTING, CONNECTED }
 
-const val APP_VERSION = "1.6.0"
+const val APP_VERSION = "2.0.0"
 
 /**
- * Session stats measured from real ping tests of the current server —
- * direct port of the Android app's ZeroStatsTracker so the Windows window
- * shows the very same JITTER / LOSS / UPTIME pills.
+ * Dispatches blocks on the AWT Event Dispatch Thread — the thread that runs
+ * Compose Desktop composition. kotlinx-coroutines-swing is NOT on the
+ * classpath (Dispatchers.Main throws "Module with the Main dispatcher is
+ * missing"), so the app ships this tiny dispatcher instead. Every observable
+ * state write is confined here.
  */
-object ZeroStatsTracker {
-    var lastPing by mutableStateOf<Long?>(null)
-    var currentPing by mutableStateOf<Long?>(null)
-    var jitterMs by mutableStateOf<Long?>(null)
-    var attempts by mutableStateOf(0)
-    var failures by mutableStateOf(0)
-
-    val lossPercent: Int
-        get() = if (attempts == 0) 0 else (failures * 100 + attempts / 2) / attempts
-
-    /** Record a real-ping outcome for the current server (delay < 0 = failure). */
-    fun record(delayMillis: Long) {
-        attempts++
-        if (delayMillis < 0) {
-            failures++
-            return
-        }
-        lastPing = currentPing
-        currentPing = delayMillis
-        lastPing?.let { prev ->
-            val sample = kotlin.math.abs(delayMillis - prev)
-            jitterMs = (jitterMs?.let { old -> (old * 3 + sample) / 4 } ?: sample)
-                .coerceAtLeast(0)
-        }
-    }
-
-    fun reset() {
-        lastPing = null; currentPing = null; jitterMs = null
-        attempts = 0; failures = 0
+val EdtDispatcher: CoroutineDispatcher = object : CoroutineDispatcher() {
+    override fun dispatch(context: CoroutineContext, block: Runnable) {
+        if (javax.swing.SwingUtilities.isEventDispatchThread()) block.run()
+        else javax.swing.SwingUtilities.invokeLater(block)
     }
 }
 
-/** Singleton app state, persisted as JSON in the user data directory. */
+// ---------------------------------------------------------------------------
+// Store — the single source of truth.
+//
+// THREADING CONTRACT (v2.0.0 — the "Unsupported concurrent change during
+// composition" crash fix):
+//
+//   * Compose Desktop runs composition on the AWT Event Dispatch Thread.
+//   * EVERY write to the observable states below happens on Main (EDT) —
+//     either directly inside UI event handlers, or inside coroutines
+//     launched on [uiScope] / continued with `withContext(Dispatchers.Main)`.
+//   * Background (Dispatchers.IO) code computes results and POSTS them back
+//     to Main before touching any state. File/network work stays on IO.
+//   * NOTHING is ever written during composition itself (the v1.6.0 bug:
+//     LocationsScreen assigned Store.selectedGroup inside the composable
+//     body, racing the IO coroutines that also wrote Store — Compose threw
+//     "Unsupported concurrent change during composition" and the app became
+//     unusable).
+//
+// With one-writer-thread discipline this whole crash class is gone.
+// ---------------------------------------------------------------------------
 object Store {
-    val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** UI-scope: all observable-state writes are confined here (EDT). */
+    val ui = CoroutineScope(SupervisorJob() + EdtDispatcher)
+    /** Worker pool for network/file/core operations. */
+    val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
-    private val prettyJson = Json { ignoreUnknownKeys = true; prettyPrint = true }
 
-    // Observable so every screen (selected-row highlight, home card, group
-    // counts…) recomposes the moment ANY data field changes. Previously a
-    // plain var — tapping a server row mutated data silently and the UI
-    // never repainted the selection ("clicking a config does nothing").
     var data by mutableStateOf(DataFile())
 
     // --- UI state ----------------------------------------------------------
-    var view by mutableStateOf("home")            // home | locations | settings
+    var view by mutableStateOf("home")            // home | servers | settings | logs
     var status by mutableStateOf(ConnStatus.DISCONNECTED)
     var errorMsg by mutableStateOf<String?>(null)
     var busyMsg by mutableStateOf<String?>(null)  // transient progress line
@@ -116,16 +117,14 @@ object Store {
     var proxyOn by mutableStateOf(false)
     var connectedSince by mutableStateOf<Long?>(null)
     var toast by mutableStateOf<String?>(null)
-    var testing by mutableStateOf(false)   // a real-ping test is in flight
-    var pendingAddSub by mutableStateOf(false) // menu asked for the add-sub dialog
-    var drawerOpen by mutableStateOf(false) // servers-screen hamburger side drawer
-    /** Selected servers-screen group tab: subscription URL or null = Default. */
-    var selectedGroup by mutableStateOf<String?>(null)
-    /** true once the user taps a group tab — keeps the choice across screen switches. */
-    var groupChosenExplicit by mutableStateOf(false)
-    /** Main window visibility — closing the window hides it to the tray;
-     *  the app keeps running and is reopened from the tray icon. */
+    var testing by mutableStateOf(false)          // a ping test is in flight
     var windowVisible by mutableStateOf(true)
+    /** Servers-screen selected group tab: subscription URL or null = Default. */
+    var selectedGroup by mutableStateOf<String?>(null)
+    /** true once the user taps a group tab — keeps the choice across screens. */
+    var groupChosenExplicit by mutableStateOf(false)
+    /** xray.exe version string — filled once at startup by the version probe. */
+    var coreVersion by mutableStateOf<String?>(null)
 
     val pingMap = mutableStateMapOf<String, Long>()
 
@@ -139,6 +138,8 @@ object Store {
 
     val socksPort get() = data.settings.socksPort
     val httpPort get() = data.settings.socksPort + 1
+    /** Local API port for the xray stats service (socks + 2). */
+    val apiPort get() = data.settings.socksPort + 2
     val autoProxy get() = data.settings.autoProxy
 
     val selectedProfile: ProfileRec?
@@ -170,7 +171,6 @@ object Store {
             val src = Store::class.java.protectionDomain.codeSource.location.toURI()
             var dir = File(src).parentFile           // .../app  (or build/classes dir)
             dir?.parentFile?.let { parent ->
-                // In the shipped layout the jar lives in <root>/app/
                 if (File(parent, "core").isDirectory) return@lazy parent
             }
             File(".").absoluteFile
@@ -192,37 +192,40 @@ object Store {
             val f = File(dataDir, "data.json")
             if (f.isFile) data = json.decodeFromString(f.readText())
         } catch (_: Throwable) { }
-        // Safety: drop duplicated profile ids (old files could contain the
-        // same link twice) and keep the selection valid.
         data = data.copy(profiles = data.profiles.distinctBy { it.id })
         if (profiles.isNotEmpty() && profiles.none { it.id == data.selected }) {
             data = data.copy(selected = profiles.first().id)
         }
         data.pings.forEach { (k, v) -> if (v > 0) pingMap[k] = v }
+        // Restore the last known ping of the selected server so the home
+        // hero shows a number right after launch instead of "—".
+        data.selected?.let { sel -> ping = pingMap[sel]?.takeIf { it > 0 } }
         ThemeState.apply(data.settings.theme == "dark")
         GeoLookup.loadCache()
-        // Pre-fetch geo (flag + IP) for every server host, like the phone app.
         profiles.forEach { p ->
             ServerInfo.hostPort(p.link)?.first?.let { GeoLookup.ensureLookup(it) }
         }
     }
 
+    /** Persist the CURRENT data snapshot — IO only, no state mutation here. */
     fun save() {
-        try {
-            data = data.copy(pings = pingMap.filterValues { it > 0 })
-            File(dataDir, "data.json").writeText(json.encodeToString(data))
-        } catch (_: Throwable) { }
+        val snapshot = data.copy(pings = pingMap.filterValues { it > 0 })
+        io.launch {
+            try {
+                File(dataDir, "data.json").writeText(json.encodeToString(snapshot))
+            } catch (_: Throwable) { }
+        }
     }
 
     fun toast(msg: String) {
         toast = msg
-        scope.launch {
-            kotlinx.coroutines.delay(3500)
+        ui.launch {
+            kotlinx.coroutines.delay(3200)
             if (toast == msg) toast = null
         }
     }
 
-    // --- Mutations ----------------------------------------------------------
+    // --- Mutations (Main only) ----------------------------------------------
     fun setSocksPort(p: Int) {
         val port = p.coerceIn(1024, 65530)
         data = data.copy(settings = data.settings.copy(socksPort = port))
@@ -236,6 +239,12 @@ object Store {
 
     fun setAutoConnect(v: Boolean) {
         data = data.copy(settings = data.settings.copy(autoConnect = v))
+        save()
+    }
+
+    /** autoSwitch only applies from the NEXT start of the tunnel. */
+    fun setAutoSwitch(v: Boolean) {
+        data = data.copy(settings = data.settings.copy(autoSwitch = v))
         save()
     }
 
@@ -312,8 +321,7 @@ object Store {
     val subscriptions get() = data.subscriptions
 
     /** ms > 0 = real delay; ms <= 0 = failed/timeout — recorded as -1 so a
-     *  stale number from an earlier test never survives a dead server
-     *  (previously failures were silently skipped, keeping bogus results). */
+     *  stale number from an earlier test never survives a dead server. */
     fun recordPing(id: String, ms: Long) {
         pingMap[id] = if (ms > 0) ms else -1
         if (id == selectedId) ping = ms.takeIf { it > 0 }
@@ -327,6 +335,6 @@ fun trafficString(bytes: Long): String {
     var v = bytes.toDouble()
     var i = 0
     while (v >= 1024.0 && i < units.size - 1) { v /= 1024.0; i++ }
-    return if (i == 0) "${bytes} B"
+    return if (i == 0) "$bytes B"
     else String.format("%.1f %s", v, units[i])
 }

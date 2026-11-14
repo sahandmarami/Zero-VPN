@@ -25,12 +25,36 @@ object XrayConfig {
 
     val json = Json { encodeDefaults = true; prettyPrint = true }
 
-    fun buildFullConfig(link: String, socksPort: Int, httpPort: Int): JsonObject? {
+    /**
+     * Full xray config. v2.0.0 additions (live traffic stats):
+     *  - `stats` service + system inbound uplink/downlink policies
+     *  - loopback dokodemo-door `api-in` on apiPort routed to the built-in
+     *    `api` outbound (StatsService) — queried by StatsClient every second
+     *    while the tunnel is up (same data source v2rayN uses).
+     */
+    fun buildFullConfig(link: String, socksPort: Int, httpPort: Int, apiPort: Int): JsonObject? {
         val outbound = buildOutbound(link) ?: return null
         return buildJsonObject {
             put("log", buildJsonObject {
                 put("loglevel", "warning")
                 put("error", File(Store.dataDir, "xray-error.log").absolutePath)
+            })
+            put("stats", buildJsonObject { })
+            put("api", buildJsonObject {
+                put("tag", "api")
+                put("services", buildJsonArray { add(kotlinx.serialization.json.JsonPrimitive("StatsService")) })
+            })
+            put("policy", buildJsonObject {
+                put("levels", buildJsonObject {
+                    put("0", buildJsonObject {
+                        put("statsUserUplink", true)
+                        put("statsUserDownlink", true)
+                    })
+                })
+                put("system", buildJsonObject {
+                    put("statsInboundUplink", true)
+                    put("statsInboundDownlink", true)
+                })
             })
             put("inbounds", buildJsonArray {
                 add(buildJsonObject {
@@ -38,6 +62,13 @@ object XrayConfig {
                     put("listen", "127.0.0.1")
                     put("port", socksPort)
                     put("protocol", "socks")
+                    put("sniffing", buildJsonObject {
+                        put("enabled", true)
+                        put("destOverride", buildJsonArray {
+                            add(kotlinx.serialization.json.JsonPrimitive("http"))
+                            add(kotlinx.serialization.json.JsonPrimitive("tls"))
+                        })
+                    })
                     put("settings", buildJsonObject {
                         put("auth", "noauth")
                         put("udp", true)
@@ -49,6 +80,15 @@ object XrayConfig {
                     put("port", httpPort)
                     put("protocol", "http")
                     put("settings", buildJsonObject { })
+                })
+                add(buildJsonObject {
+                    put("tag", "api-in")
+                    put("listen", "127.0.0.1")
+                    put("port", apiPort)
+                    put("protocol", "dokodemo-door")
+                    put("settings", buildJsonObject {
+                        put("address", "127.0.0.1")
+                    })
                 })
             })
             put("outbounds", buildJsonArray {
@@ -65,6 +105,11 @@ object XrayConfig {
             put("routing", buildJsonObject {
                 put("domainStrategy", "IPIfNonMatch")
                 put("rules", buildJsonArray {
+                    add(buildJsonObject {
+                        put("type", "field")
+                        put("inboundTag", buildJsonArray { add(kotlinx.serialization.json.JsonPrimitive("api-in")) })
+                        put("outboundTag", "api")
+                    })
                     add(buildJsonObject {
                         put("type", "field")
                         put("ip", buildJsonArray { add(kotlinx.serialization.json.JsonPrimitive("geoip:private")) })
@@ -399,11 +444,15 @@ object Engine {
 
     val isRunning: Boolean get() = process?.isAlive == true
 
-    fun start(configFile: File): Boolean {
+    /**
+     * Start the core. Called from an IO coroutine. Returns the started
+     * process (alive after the settle delay) or null.
+     */
+    fun start(configFile: File): Process? {
         stop()
         val exeName = if (Store.isWindows) "xray.exe" else "xray"
         val exe = File(Store.coreDir, exeName)
-        if (!exe.isFile) return false
+        if (!exe.isFile) return null
         return try {
             val pb = ProcessBuilder(exe.absolutePath, "run", "-c", configFile.absolutePath)
                 .directory(Store.coreDir)
@@ -414,9 +463,9 @@ object Engine {
             val p = pb.start()
             process = p
             Thread.sleep(600)
-            p.isAlive
+            if (p.isAlive) p else null
         } catch (_: Throwable) {
-            false
+            null
         }
     }
 
@@ -425,6 +474,9 @@ object Engine {
         fun file(f: File): ProcessBuilder.Redirect = ProcessBuilder.Redirect.to(f)
     }
 
+    /**
+     * Block until the tunnel inbound answers on 127.0.0.1:<port> or timeout.
+     */
     fun waitForPort(port: Int, timeoutMs: Long): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
@@ -439,11 +491,38 @@ object Engine {
         return false
     }
 
+    /**
+     * Block until the core exits or the timeout elapses. Used by the
+     * watchdog to detect a crashed/disconnected core.
+     */
+    fun waitForExit(timeoutMs: Long): Boolean = try {
+        process?.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS) ?: true
+    } catch (_: Throwable) {
+        true
+    }
+
     fun stop() {
         try { process?.destroy() } catch (_: Throwable) { }
         try { process?.waitFor(1500, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: Throwable) { }
         if (process?.isAlive == true) try { process?.destroyForcibly() } catch (_: Throwable) { }
         process = null
+    }
+
+    /** `xray version` — fills the settings “core” row (best effort, IO only). */
+    fun probeVersion(): String? = try {
+        val exeName = if (Store.isWindows) "xray.exe" else "xray"
+        val exe = File(Store.coreDir, exeName)
+        if (!exe.isFile) null
+        else {
+            val p = ProcessBuilder(exe.absolutePath, "version")
+                .directory(Store.coreDir).start()
+            val out = p.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+            p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
+            Regex("Xray ([0-9.]+)").find(out)?.groupValues?.get(1)
+                ?: out.lineSequence().firstOrNull { it.isNotBlank() }?.take(40)
+        }
+    } catch (_: Throwable) {
+        null
     }
 
     /**

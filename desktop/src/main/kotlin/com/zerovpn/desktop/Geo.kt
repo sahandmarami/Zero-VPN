@@ -1,5 +1,6 @@
 package com.zerovpn.desktop
 
+import androidx.compose.runtime.mutableStateMapOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -35,8 +36,9 @@ object GeoLookup {
     private val sessionCache = ConcurrentHashMap<String, ServerGeo?>()
     private val failedHosts = ConcurrentHashMap.newKeySet<String>()
 
-    /** host -> geo, observed by the UI. */
-    val byHost = ConcurrentHashMap<String, ServerGeo>()
+    /** host -> geo, observed by the UI (snapshot state map — writes happen
+     *  only from IO coroutines, never during composition). */
+    val byHost = mutableStateMapOf<String, ServerGeo>()
 
     private fun cacheFile(): File = File(Store.dataDir, "geo_cache.json")
 
@@ -71,7 +73,7 @@ object GeoLookup {
             sessionCache[h]?.let { byHost[h] = it }
             return
         }
-        Store.scope.launch {
+        Store.io.launch {
             val geo = withContext(Dispatchers.IO) { lookupHost(h) }
             if (geo != null) {
                 sessionCache[h] = geo
