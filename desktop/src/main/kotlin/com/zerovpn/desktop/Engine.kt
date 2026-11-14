@@ -163,10 +163,86 @@ object XrayConfig {
             link.startsWith("vless://") -> vless(link)
             link.startsWith("trojan://") -> trojan(link)
             link.startsWith("ss://") -> shadowsocks(link)
+            link.startsWith("hysteria2://") -> hysteria2(link)
             else -> null
         }
     } catch (_: Throwable) {
         null
+    }
+
+    /**
+     * v2.2.0 — hysteria2 parity (THE fix behind "subscription doesn't get
+     * added" on Windows): Iranian subscription lists are hysteria2-heavy and
+     * the desktop dropped every hysteria2:// line at import, so hy2-only subs
+     * added ZERO servers while the same sub worked on the phone.
+     *
+     * Outbound shape mirrors the Android app's CoreOutboundBuilder
+     * (toOutboundHysteria2 + populateTransportSettings HYSTERIA branch) — the
+     * exact JSON the bundled core family accepts:
+     *
+     *   protocol "hysteria", settings { address, port, version: 2 },
+     *   streamSettings.network "hysteria", security "tls" with alpn ["h3"],
+     *   hysteriaSettings { version: 2, auth }, finalmask.quicParams.udpHop
+     *   (mport= port hopping) and finalmask.udp salamander (obfs).
+     */
+    private fun hysteria2(link: String): JsonObject {
+        val uri = URI(link.replace(" ", "%20"))
+        val q = query(uri.rawQuery)
+        val pass = URLDecoder.decode(uri.rawUserInfo ?: "", "UTF-8")
+        val host = uri.host ?: ""
+        val port = if (uri.port > 0) uri.port else 443
+        val sni = (q["sni"] ?: host).ifBlank { host }
+        val obfsPassword = q["obfs-password"] ?: ""
+        val mport = q["mport"] ?: ""
+        val pin = q["pinSHA256"] ?: q["pcs"] ?: ""
+        val vcn = q["vcn"] ?: q["verifyPeerCertByName"] ?: ""
+
+        val stream = buildJsonObject {
+            put("network", "hysteria")
+            put("security", "tls")
+            put("tlsSettings", buildJsonObject {
+                put("serverName", sni)
+                // The bundled core (26.9.27 fork) REMOVED allowInsecure=true
+                // (fatal config error). Migration path: pin the cert hash.
+                put("allowInsecure", false)
+                // NOTE: pinnedPeerCertSha256 in this core build is a HEX
+                // sha256 STRING (verified live: base64 fails with
+                // "encoding/hex: invalid byte"). Hy2 links carry base64 pins
+                // — convert; keep plain-hex as-is; drop anything else.
+                normalizePin(pin)?.let { put("pinnedPeerCertSha256", it) }
+                if (vcn.isNotBlank()) put("verifyPeerCertByName", vcn)
+                put("alpn", buildJsonArray { add(kotlinx.serialization.json.JsonPrimitive("h3")) })
+            })
+            put("hysteriaSettings", buildJsonObject {
+                put("version", 2)
+                put("auth", pass)
+            })
+            put("finalmask", buildJsonObject {
+                put("quicParams", buildJsonObject {
+                    if (mport.isNotBlank()) put("udpHop", buildJsonObject {
+                        put("ports", mport)
+                        put("interval", "30")
+                    })
+                })
+                if (obfsPassword.isNotBlank()) put("udp", buildJsonArray {
+                    add(buildJsonObject {
+                        put("type", "salamander")
+                        put("settings", buildJsonObject { put("password", obfsPassword) })
+                    })
+                })
+            })
+        }
+        return buildJsonObject {
+            put("tag", "proxy")
+            put("protocol", "hysteria")
+            put("settings", buildJsonObject {
+                put("address", host)
+                put("port", port)
+                put("version", 2)
+                put("level", 0)
+            })
+            put("streamSettings", stream)
+        }
     }
 
     private fun vmess(link: String): JsonObject? {
@@ -189,6 +265,7 @@ object XrayConfig {
             host = s("host"),
             path = s("path"),
             serviceName = s("path"),          // grpc uses path field in some subs
+            mode = "",
             security = security,
             sni = s("sni").ifBlank { s("host") },
             alpn = s("alpn"),
@@ -196,6 +273,7 @@ object XrayConfig {
             cs = s("cs"),                     // cipherSuites (anti-NIN), v2rayNG 2.3.x parity
             pbk = "", sid = "", spx = "",
             allowInsecure = false,
+            pin = "", vcn = "",
         )
         return buildJsonObject {
             put("tag", "proxy")
@@ -243,6 +321,7 @@ object XrayConfig {
             host = q["host"] ?: "",
             path = q["path"] ?: "",
             serviceName = q["serviceName"] ?: "",
+            mode = q["mode"] ?: "",
             security = security,
             sni = q["sni"] ?: host,
             alpn = q["alpn"] ?: "",
@@ -252,6 +331,8 @@ object XrayConfig {
             sid = q["sid"] ?: "",
             spx = q["spx"] ?: "",
             allowInsecure = q["allowInsecure"] == "1" || q["insecure"] == "1",
+            pin = q["pinSHA256"] ?: q["pcs"] ?: "",
+            vcn = q["vcn"] ?: q["verifyPeerCertByName"] ?: "",
         )
         return buildJsonObject {
             put("tag", "proxy")
@@ -299,6 +380,7 @@ object XrayConfig {
             host = q["host"] ?: "",
             path = q["path"] ?: "",
             serviceName = q["serviceName"] ?: "",
+            mode = q["mode"] ?: "",
             security = security,
             sni = q["sni"] ?: q["peer"] ?: host,
             alpn = q["alpn"] ?: "",
@@ -308,6 +390,8 @@ object XrayConfig {
             sid = q["sid"] ?: "",
             spx = q["spx"] ?: "",
             allowInsecure = q["allowInsecure"] == "1" || q["insecure"] == "1",
+            pin = q["pinSHA256"] ?: q["pcs"] ?: "",
+            vcn = q["vcn"] ?: q["verifyPeerCertByName"] ?: "",
         )
         return buildJsonObject {
             put("tag", "proxy")
@@ -387,6 +471,34 @@ object XrayConfig {
         }
     }
 
+    /**
+     * pinnedPeerCertSha256 normalization for the bundled core (26.9.27 fork):
+     * the field must be a HEX-encoded sha256 (64 chars). Hy2 links carry a
+     * base64 pin per the hysteria2 URI spec — convert it. Values already in
+     * hex pass through; anything else is dropped (an invalid pin is a fatal
+     * config error, which must never happen).
+     */
+    private fun normalizePin(raw: String): String? {
+        val p = raw.trim()
+        if (p.isEmpty()) return null
+        if (p.length == 64 && p.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }) {
+            return p.lowercase()
+        }
+        val decoders = listOf(
+            { s: String -> java.util.Base64.getUrlDecoder().decode(s) },
+            { s: String -> java.util.Base64.getDecoder().decode(s) }
+        )
+        for (dec in decoders) {
+            try {
+                val bytes = dec(p + "=".repeat((4 - p.length % 4) % 4))
+                if (bytes.size == 32) {
+                    return bytes.joinToString("") { "%02x".format(it) }
+                }
+            } catch (_: Throwable) { }
+        }
+        return null
+    }
+
     private fun query(raw: String?): Map<String, String> {
         if (raw.isNullOrBlank()) return emptyMap()
         return raw.split("&").mapNotNull {
@@ -401,8 +513,9 @@ object XrayConfig {
 
     private fun streamSettings(
         net: String, type: String, host: String, path: String, serviceName: String,
-        security: String, sni: String, alpn: String, fp: String, cs: String,
+        mode: String, security: String, sni: String, alpn: String, fp: String, cs: String,
         pbk: String, sid: String, spx: String, allowInsecure: Boolean,
+        pin: String, vcn: String,
     ): JsonObject = buildJsonObject {
         put("network", when (net) {
             "h2", "h2c" -> "http"
@@ -413,7 +526,18 @@ object XrayConfig {
         if (security == "tls") {
             put("tlsSettings", buildJsonObject {
                 put("serverName", sni)
-                put("allowInsecure", allowInsecure)
+                // v2.2.0 — the bundled core (26.9.27 fork) REMOVED
+                // allowInsecure=true (fatal config error, migrated to
+                // pinnedPeerCertSha256/verifyPeerCertByName). Never emit true:
+                // insecure=1 links fall back to normal verification, and a
+                // pinSHA256/pcs link maps onto the new pin field.
+                put("allowInsecure", false)
+                // NOTE: pinnedPeerCertSha256 in this core build is a HEX
+                // sha256 STRING (verified live: base64 fails with
+                // "encoding/hex: invalid byte"). Hy2 links carry base64 pins
+                // — convert; keep plain-hex as-is; drop anything else.
+                normalizePin(pin)?.let { put("pinnedPeerCertSha256", it) }
+                if (vcn.isNotBlank()) put("verifyPeerCertByName", vcn)
                 if (alpn.isNotBlank()) put("alpn", buildJsonArray { alpn.split(',').forEach { add(kotlinx.serialization.json.JsonPrimitive(it.trim())) } })
                 if (fp.isNotBlank()) put("fingerprint", fp)
                 // cipherSuites (anti-NIN) — same mapping as the Android app's
@@ -449,6 +573,8 @@ object XrayConfig {
             "xhttp", "splithttp" -> put("xhttpSettings", buildJsonObject {
                 put("path", if (path.isBlank()) "/" else path)
                 if (host.isNotBlank()) put("host", host)
+                // v2rayNG parity: xhttp mode (auto/packet-up/stream-up/stream-one)
+                if (mode.isNotBlank()) put("mode", mode)
             })
             "tcp" -> if (type.equals("http", true)) put("tcpSettings", buildJsonObject {
                 put("header", buildJsonObject {
@@ -752,12 +878,19 @@ object PingTest {
      * need NO working DNS at all, so they still answer on poisoned Iranian
      * resolvers where dns.google / cloudflare-dns.com (domain-based) are
      * unreachable or themselves blocked.
+     * v2.2.0: the list was too thin for real Iranian networks — 1.1.1.1 and
+     * 8.8.8.8 are among the MOST filtered IPs there. Added Quad9 (9.9.9.9,
+     * JSON on :5053), AdGuard (94.140.14.14) and per-endpoint 2.5 s caps so
+     * a fully-dead DoH path cannot stall the ping batch.
      */
     fun dohResolve(host: String): List<java.net.InetAddress> {
         val q = java.net.URLEncoder.encode(host, "UTF-8")
         val endpoints = listOf(
             "https://1.1.1.1/dns-query?name=$q&type=A",
+            "https://9.9.9.9/dns-query?name=$q&type=A",
+            "https://9.9.9.9:5053/dns-query?name=$q&type=A",
             "https://1.0.0.1/dns-query?name=$q&type=A",
+            "https://94.140.14.14/dns-query?name=$q&type=A",
             "https://dns.google/resolve?name=$q&type=A",
             "https://cloudflare-dns.com/dns-query?name=$q&type=A",
         )
@@ -776,9 +909,12 @@ object PingTest {
     }
 
     private fun viaSocksDohGet(url: String): String? = try {
-        val conn = URL(url).openConnection() as HttpURLConnection
-        conn.connectTimeout = 3500
-        conn.readTimeout = 3500
+        // v2.2.0: NO_PROXY — this used to inherit the Windows system proxy
+        // (WinINET registry), so with ANY stale/broken system proxy set the
+        // DoH fallback died too and the batch ping degraded to garbage.
+        val conn = URL(url).openConnection(java.net.Proxy.NO_PROXY) as HttpURLConnection
+        conn.connectTimeout = 2500
+        conn.readTimeout = 2500
         conn.setRequestProperty("Accept", "application/dns-json")
         conn.setRequestProperty("User-Agent", "ZeroVPN/$APP_VERSION")
         try {
@@ -800,7 +936,8 @@ object ServerInfo {
     fun hostPort(link: String): Pair<String, Int>? = try {
         when {
             link.startsWith("vmess://") -> vmessAddr(link)
-            link.startsWith("vless://") || link.startsWith("trojan://") ->
+            link.startsWith("vless://") || link.startsWith("trojan://") ||
+                link.startsWith("hysteria2://") ->
                 Regex("://[^@/]+@([^:/?#]+):(\\d+)").find(link)?.let {
                     (it.groupValues[1] to (it.groupValues[2].toIntOrNull() ?: 443))
                 }

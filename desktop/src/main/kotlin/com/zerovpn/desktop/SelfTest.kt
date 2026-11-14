@@ -41,11 +41,12 @@ fun main(args: Array<String>) {
     }
 
     // subscription body decode
-    val links = listOf(samples[0], samples[2], samples[3]).joinToString("\n")
+    val links = listOf(samples[0], samples[2], samples[3],
+        "hysteria2://secretpass@hy2.example.com:443?sni=cdn.example.com#HY2").joinToString("\n")
     val b64 = java.util.Base64.getEncoder().encodeToString(links.toByteArray())
     val parsed = Profiles.parseBody(b64)
-    println("OK    subscription decode: ${parsed.size} links (expect 3)")
-    if (parsed.size == 3) ok++
+    println("OK    subscription decode: ${parsed.size} links (expect 4)")
+    if (parsed.size == 4) ok++
 
     // --- v2.0.0 assertions -----------------------------------------------------
     // 1) Unencrypted (PattNG-style) vless on 443 WITHOUT a security param stays plain.
@@ -176,7 +177,123 @@ fun main(args: Array<String>) {
     println(if (verOk) "OK    update version compare" else "FAIL  update version compare")
     if (verOk) ok++
 
-    val expected = samples.size + 15
+    // --- v2.2.0 assertions -----------------------------------------------------
+    // 15) hysteria2 import: the line must survive parseBody (v2.1.0 dropped
+    //     it — hy2-only subs added ZERO servers on Windows).
+    val hy2PinB64 = java.util.Base64.getEncoder().encodeToString(
+        ByteArray(32) { it.toByte() }
+    )   // hex: 000102...1f
+    val hy2PinHex = (0 until 32).joinToString("") { "%02x".format(it) }
+    val hy2Link = "hysteria2://secretpass@hy2.example.com:443?sni=cdn.example.com&insecure=1" +
+        "&pinSHA256=" + java.net.URLEncoder.encode(hy2PinB64, "UTF-8") +
+        "&obfs=salamander&obfs-password=obfspass&mport=20000-30000#Test%20HY2"
+    val hy2Parsed = Profiles.parseBody("vless://b831b3c0-0123-4567-89ab-cdef01234567@example.com:443?type=tcp#A\n" + hy2Link)
+    val hy2ImportOk = hy2Parsed.size == 2 && hy2Parsed.any { it.proto == "hysteria2" }
+    println(if (hy2ImportOk) "OK    hysteria2 import survives parseBody" else "FAIL  hysteria2 import (${hy2Parsed.size})")
+    if (hy2ImportOk) ok++
+
+    // 16) hysteria2 outbound shape = the Android CoreOutboundBuilder JSON,
+    //     with the core-26.9.27 allowInsecure migration applied:
+    //     allowInsecure=true is a FATAL config error in this core build, so
+    //     it must never appear; pinSHA256 maps to pinnedPeerCertSha256.
+    val hy2Out = XrayConfig.buildOutbound(hy2Link)
+    val hy2Json = (hy2Out?.toString() ?: "").replace(" ", "")
+    val hy2ShapeOk = hy2Out != null &&
+        hy2Json.contains("\"protocol\":\"hysteria\"") &&
+        hy2Json.contains("\"version\":2") &&
+        hy2Json.contains("\"auth\":\"secretpass\"") &&
+        hy2Json.contains("\"hysteriaSettings\"") &&
+        hy2Json.contains("\"network\":\"hysteria\"") &&
+        hy2Json.contains("h3") &&
+        hy2Json.contains("salamander") &&
+        hy2Json.contains("20000-30000") &&
+        hy2Json.contains("pinnedPeerCertSha256") &&
+        hy2Json.contains(hy2PinHex) &&
+        !hy2Json.contains("\"allowInsecure\":true")
+    println(if (hy2ShapeOk) "OK    hysteria2 outbound (hysteriaSettings + finalmask + pin migration)" else "FAIL  hysteria2 outbound shape")
+    if (hy2ShapeOk) ok++
+
+    // 16b) allowInsecure=1 WITHOUT a pin must ALSO never produce
+    //      allowInsecure:true (the core rejects the whole config).
+    val insOut = XrayConfig.buildOutbound(
+        "vless://b831b3c0-0123-4567-89ab-cdef01234567@example.com:443?security=tls&insecure=1&type=tcp#InsecNoPin"
+    )?.toString()?.replace(" ", "") ?: ""
+    val insOk = insOut.contains("\"allowInsecure\":false") && !insOut.contains("\"allowInsecure\":true")
+    println(if (insOk) "OK    insecure link never emits allowInsecure:true" else "FAIL  insecure link migration")
+    if (insOk) ok++
+
+    // 17) ServerInfo.hostPort covers hysteria2 (geo chip + prefilter input)
+    val hy2Hp = ServerInfo.hostPort(hy2Link)
+    val hy2HpOk = hy2Hp == ("hy2.example.com" to 443)
+    println(if (hy2HpOk) "OK    hysteria2 host/port extraction" else "FAIL  hysteria2 host/port: $hy2Hp")
+    if (hy2HpOk) ok++
+
+    // 18) Manual redirect chain + userinfo merge (the desktop fetch used to
+    //     die on cross-protocol hops and lose the quota header). A raw
+    //     loopback server answers /sub with 301 → /final → base64 body +
+    //     subscription-userinfo.
+    var chainOk = false
+    var chainErr = ""
+    try {
+        val srv = java.net.ServerSocket(0, 8, java.net.InetAddress.getLoopbackAddress())
+        val port = srv.localPort
+        val linksBlob = java.util.Base64.getEncoder().encodeToString(
+            "vless://b831b3c0-0123-4567-89ab-cdef01234567@example.com:443?type=tcp#ChainServer".toByteArray()
+        )
+        fun readRequest(c: java.net.Socket): String {
+            val sb = StringBuilder()
+            val ins = c.getInputStream()
+            while (true) {
+                val b = ins.read()
+                if (b < 0) break
+                sb.append(b.toChar())
+                if (sb.length >= 4 && sb.endsWith("\r\n\r\n")) break
+            }
+            return sb.toString()
+        }
+        val worker = Thread {
+            try {
+                srv.soTimeout = 4000
+                // hop 1: 301
+                srv.accept().use { c ->
+                    readRequest(c)
+                    c.getOutputStream().write(
+                        ("HTTP/1.1 301 Moved Permanently\r\nLocation: /final\r\n" +
+                            "Subscription-Userinfo: upload=10; download=20; total=1000; expire=0\r\n" +
+                            "Content-Length: 0\r\nConnection: close\r\n\r\n").toByteArray()
+                    )
+                }
+                // hop 2: 200 + body + (later-wins) userinfo
+                srv.accept().use { c ->
+                    readRequest(c)
+                    val body = linksBlob
+                    c.getOutputStream().write(
+                        ("HTTP/1.1 200 OK\r\nSubscription-Userinfo: upload=100; download=200; total=5000; expire=0\r\n" +
+                            "Content-Type: text/plain\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body").toByteArray()
+                    )
+                }
+            } catch (_: Throwable) { }
+        }
+        worker.isDaemon = true
+        worker.start()
+        val res = Profiles.fetchSub("http://127.0.0.1:$port/sub")
+        srv.close()
+        chainOk = res.error == null && res.profiles.size == 1 &&
+            res.info?.total == 5000L && res.info?.used == 300L
+        chainErr = res.error ?: ""
+    } catch (t: Throwable) {
+        chainErr = t.message ?: t.javaClass.simpleName
+    }
+    println(if (chainOk) "OK    redirect chain follows hops + merges userinfo" else "FAIL  redirect chain: $chainErr")
+    if (chainOk) ok++
+
+    // 19) CorePing re-tagging contract: every buildOutbound result carries a
+    //     tag the chunk builder copies/replaces (o<i>).
+    val chunkCfg = XrayConfig.buildOutbound(samples[1])?.get("tag")?.toString() == "\"proxy\""
+    println(if (chunkCfg) "OK    chunk outbound base (tag proxy present)" else "FAIL  chunk outbound base")
+    if (chunkCfg) ok++
+
+    val expected = samples.size + 21
     println(
         if (ok == expected && full != null) "SELFTEST PASS ($ok/$expected)"
         else "SELFTEST FAIL ($ok expected $expected)"

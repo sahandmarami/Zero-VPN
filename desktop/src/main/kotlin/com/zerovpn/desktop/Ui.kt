@@ -967,6 +967,7 @@ fun protoLabel(proto: String): String = when (proto) {
     "vless" -> "VLESS"
     "trojan" -> "Trojan"
     "ss" -> "Shadowsocks"
+    "hysteria2" -> "Hysteria2"
     else -> proto.uppercase()
 }
 

@@ -66,7 +66,7 @@ data class DataFile(
 
 enum class ConnStatus { DISCONNECTED, CONNECTING, CONNECTED }
 
-const val APP_VERSION = "2.1.0"
+const val APP_VERSION = "2.2.0"
 
 /** Release page opened by the update banner. */
 const val RELEASES_URL = "https://github.com/sahandmarami/Zero-VPN/releases/latest"

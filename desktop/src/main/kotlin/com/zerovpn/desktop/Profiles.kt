@@ -25,7 +25,10 @@ data class SubFetchResult(
  */
 object Profiles {
 
-    private val supported = setOf("vmess", "vless", "trojan", "ss")
+    // v2.2.0: hysteria2 joined the supported set — Iranian subs are
+    // hysteria2-heavy and the phone app accepts them; dropping the lines here
+    // meant hy2-only subscriptions added ZERO servers on Windows.
+    private val supported = setOf("vmess", "vless", "trojan", "ss", "hysteria2")
 
     /** Decode a subscription body: base64 blob or plain link lines. */
     fun parseBody(body: String): List<ParsedLink> {
@@ -82,10 +85,23 @@ object Profiles {
      *      "subscription through proxy" behaviour v2rayNG has, most reliable
      *      whenever the VPN is already up;
      *   2. direct HTTPS (the old behaviour);
-     *   3. direct HTTPS to a DoH-resolved IP (1.1.1.1/1.0.0.1 JSON DoH needs
+     *   3. direct HTTPS to a DoH-resolved IP (1.1.1.1/9.9.9.9 JSON DoH needs
      *      no working DNS at all) keeping the original SNI + Host header —
      *      defeats DNS poisoning;
      *   4. plain HTTP (some providers ship http:// subs).
+     *
+     * v2.2.0 hardening (the phone fetched the same URL fine — these were the
+     * desktop-specific kill paths):
+     *   - every connection is pinned with Proxy.NO_PROXY. HttpURLConnection
+     *     on Windows silently inherits the WinINET system proxy (which this
+     *     very app may have left pointing at a dead local port), so the
+     *     doh-ip strategy and the DoH resolver could ALL die together;
+     *   - redirects are followed MANUALLY (up to 4 hops, cross-protocol
+     *     http<->https included) — java.net would refuse cross-protocol
+     *     hops and surface the 30x as a final error;
+     *   - subscription-userinfo is merged along the WHOLE redirect chain
+     *     (later values win) like the Android app does, so quota survives
+     *     providers that attach the header on the first hop.
      *
      * Every failure is recorded; the final error is a compact Persian summary
      * instead of a raw exception class name.
@@ -101,10 +117,10 @@ object Profiles {
         for (strategy in strategies) {
             try {
                 val (body, info) = when (strategy) {
-                    "tunnel" -> fetchWithInfo(url, socksPort = socksPort)
-                    "direct" -> fetchWithInfo(url)
+                    "tunnel" -> fetchChain(url, socksPort)
+                    "direct" -> fetchChain(url, null)
                     "doh-ip" -> fetchViaDohIp(url)
-                    else -> fetchWithInfo(url.replaceFirst("https://", "http://", true))
+                    else -> fetchChain(url.replaceFirst("https://", "http://", true), null)
                 }
                 val links = parseBody(body)
                 if (links.isEmpty() && info == null) {
@@ -151,9 +167,120 @@ object Profiles {
     }
 
     /**
+     * v2.2.0 — open a subscription connection and follow the redirect chain
+     * MANUALLY (up to 4 hops, cross-protocol included — java.net refuses
+     * https→http hops by itself and would surface the 30x as a final error).
+     * `subscription-userinfo` is merged across ALL hops (later values win,
+     * same as the Android OkHttp loop). Every hop is pinned with an explicit
+     * proxy — NEVER the Windows system proxy.
+     */
+    private fun fetchChain(url: String, socksPort: Int?): Pair<String, SubRec?> {
+        var current = url
+        var info: SubRec? = null
+        repeat(4) {
+            val con = openSubConnection(current, socksPort, null)
+            val code = con.responseCode
+            parseUserinfo(con, url)?.let { info = it }
+            if (code in 300..399) {
+                val loc = con.getHeaderField("Location")
+                con.disconnect()
+                if (loc.isNullOrBlank()) throw RuntimeException("HTTP $code بدون مقصد ریدایرکت")
+                current = resolveLocation(current, loc)
+                    ?: throw RuntimeException("HTTP $code با مقصد ریدایرکت نامعتبر")
+                return@repeat
+            }
+            if (code !in 200..299) {
+                con.disconnect()
+                throw RuntimeException("HTTP $code")
+            }
+            val body = con.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+            con.disconnect()
+            return body to info
+        }
+        throw RuntimeException("زنجیره ریدایرکت بیش از حد طولانی است")
+    }
+
+    /** RFC-style Location resolver (absolute or relative), Android-parity. */
+    private fun resolveLocation(baseUrl: String, raw: String): String? = try {
+        val base = java.net.URI(baseUrl)
+        val loc = java.net.URI(raw.trim())
+        val resolved = if (loc.isAbsolute) loc else base.resolve(loc)
+        resolved.toURL().toString()
+    } catch (_: Throwable) {
+        try {
+            java.net.URL(java.net.URL(baseUrl), raw.trim()).toString()
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /**
+     * Open one HTTP(S) connection for the fetch ladder. The proxy is ALWAYS
+     * explicit (tunnel SOCKS or NO_PROXY) — on Windows the implicit default
+     * is the WinINET system proxy, which any stale/broken registration turns
+     * into a total blackout of every fetch. `sniHost != null` switches to the
+     * doh-ip dialing mode: TCP goes to the URL's IP host while the TLS SNI +
+     * Host header keep the real domain.
+     */
+    private fun openSubConnection(
+        url: String,
+        socksPort: Int?,
+        sniHost: String?,
+    ): HttpURLConnection {
+        val u = URL(url)
+        val con = u.openConnection(
+            when {
+                socksPort != null ->
+                    java.net.Proxy(java.net.Proxy.Type.SOCKS, java.net.InetSocketAddress("127.0.0.1", socksPort))
+                else -> java.net.Proxy.NO_PROXY
+            }
+        ) as HttpURLConnection
+        con.connectTimeout = 15000
+        con.readTimeout = 15000
+        con.instanceFollowRedirects = false      // hops are followed manually
+        con.setRequestProperty("User-Agent", "v2rayNG/1.9.16")
+        con.setRequestProperty("Accept", "*/*")
+        con.setRequestProperty("Connection", "close")
+        if (sniHost != null) {
+            con.setRequestProperty("Host", sniHost)
+            (con as? javax.net.ssl.HttpsURLConnection)?.let { h ->
+                h.sslSocketFactory = SniFactory(sniHost)
+                h.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, _ -> true }
+            }
+        }
+        return con
+    }
+
+    /** Extract + normalize subscription-userinfo from one response. */
+    private fun parseUserinfo(con: HttpURLConnection, url: String): SubRec? = try {
+        val raw = con.headerFields.entries
+            .firstOrNull { it.key?.equals("subscription-userinfo", true) == true }
+            ?.value?.joinToString(";")
+        if (raw.isNullOrBlank()) null
+        else {
+            val map = raw.split(";").mapNotNull {
+                val p = it.split("=", limit = 2)
+                if (p.size == 2) p[0].trim().lowercase() to p[1].trim().toLongOrNull() else null
+            }.toMap()
+            SubRec(
+                url = url,
+                name = "",
+                used = (map["upload"] ?: 0) + (map["download"] ?: 0),
+                total = map["total"] ?: 0,
+                expire = map["expire"] ?: 0,
+            )
+        }
+    } catch (_: Throwable) {
+        null
+    }
+
+    /**
      * Fetch the URL by TCP-connecting to a DoH-resolved IP while keeping the
      * original Host header + SNI. Defeats poisoned/censored local DNS for the
-     * subscription host. Requires https://.
+     * subscription host. Requires https://. v2.2.0: pinned to NO_PROXY (it
+     * inherited the Windows system proxy and died with it) and redirect hops
+     * after the first one fall back to normal dialing when the Location
+     * leaves the original host.
      */
     private fun fetchViaDohIp(url: String): Pair<String, SubRec?> {
         val u = URL(url)
@@ -161,24 +288,43 @@ object Profiles {
         val ips = PingTest.dohResolve(host)
         if (ips.isEmpty()) throw java.net.UnknownHostException(host)
         var last: Throwable? = null
-        for (ip in ips.take(3)) {
+        var info: SubRec? = null
+        var current = url
+        var currentHost = host
+        hop@ for (hop in 0 until 4) {
+            val con = if (hop == 0 || currentHost == host) {
+                val ip = ips.getOrNull((hop) % ips.size.coerceAtLeast(1)) ?: ips.first()
+                openSubConnection("https://$ip${u.file}", null, currentHost)
+            } else {
+                // Redirect moved to another host — dial it normally.
+                openSubConnection(current, null, null)
+            }
             try {
-                val alt = URL("https://$ip${u.file}")
-                val con = alt.openConnection() as javax.net.ssl.HttpsURLConnection
-                con.connectTimeout = 15000
-                con.readTimeout = 15000
-                con.instanceFollowRedirects = true
-                con.setRequestProperty("User-Agent", "v2rayNG/1.9.16")
-                con.setRequestProperty("Accept", "*/*")
-                con.setRequestProperty("Host", host)     // original host header
-                con.sslSocketFactory = SniFactory(host)  // original SNI
-                con.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, _ -> true }
-                return readSubResponse(con, url)
+                val code = con.responseCode
+                parseUserinfo(con, url)?.let { info = it }
+                if (code in 300..399) {
+                    val loc = con.getHeaderField("Location")
+                    con.disconnect()
+                    if (loc.isNullOrBlank()) throw RuntimeException("HTTP $code بدون مقصد ریدایرکت")
+                    current = resolveLocation(current, loc)
+                        ?: throw RuntimeException("HTTP $code با مقصد ریدایرکت نامعتبر")
+                    currentHost = try { URL(current).host } catch (_: Throwable) { "" }
+                    continue@hop
+                }
+                if (code !in 200..299) {
+                    con.disconnect()
+                    throw RuntimeException("HTTP $code")
+                }
+                val body = con.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+                con.disconnect()
+                return body to info
             } catch (t: Throwable) {
+                try { con.disconnect() } catch (_: Throwable) { }
                 last = t
+                break@hop
             }
         }
-        throw last ?: java.net.UnknownHostException(host)
+        throw last ?: RuntimeException("HTTP fetch failed")
     }
 
     /**
@@ -222,56 +368,15 @@ object Profiles {
         override fun getSupportedCipherSuites(): Array<String> = delegate.supportedCipherSuites
     }
 
-    /** Read the body + subscription-userinfo header out of a live connection. */
-    private fun readSubResponse(
-        con: HttpURLConnection,
-        url: String,
-    ): Pair<String, SubRec?> {
-        val code = con.responseCode
-        if (code !in 200..299) throw RuntimeException("HTTP $code")
-        val body = con.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
-        var info: SubRec? = null
-        try {
-            val raw = con.headerFields.entries
-                .firstOrNull { it.key?.equals("subscription-userinfo", true) == true }
-                ?.value?.joinToString(";")
-            if (!raw.isNullOrBlank()) {
-                val map = raw.split(";").mapNotNull {
-                    val p = it.split("=", limit = 2)
-                    if (p.size == 2) p[0].trim().lowercase() to p[1].trim().toLongOrNull() else null
-                }.toMap()
-                info = SubRec(
-                    url = url,
-                    name = "",
-                    used = (map["upload"] ?: 0) + (map["download"] ?: 0),
-                    total = map["total"] ?: 0,
-                    expire = map["expire"] ?: 0,
-                )
-            }
-        } catch (_: Throwable) { }
-        return body to info
-    }
-
     /** Fetch a URL body; also returns the subscription-userinfo header if present. */
-    fun fetchWithInfo(url: String, timeoutMs: Int = 15000, socksPort: Int? = null): Pair<String, SubRec?> {
-        val con = URL(url).openConnection(
-            if (socksPort != null)
-                java.net.Proxy(java.net.Proxy.Type.SOCKS, java.net.InetSocketAddress("127.0.0.1", socksPort))
-            else java.net.Proxy.NO_PROXY
-        ) as HttpURLConnection
-        con.connectTimeout = timeoutMs
-        con.readTimeout = timeoutMs
-        con.instanceFollowRedirects = true
-        con.setRequestProperty("User-Agent", "v2rayNG/1.9.16")
-        con.setRequestProperty("Accept", "*/*")
-        return readSubResponse(con, url)
-    }
+    fun fetchWithInfo(url: String, timeoutMs: Int = 15000, socksPort: Int? = null): Pair<String, SubRec?> =
+        fetchChain(url, socksPort)
 
     fun fetch(url: String, timeoutMs: Int = 15000): String = fetchWithInfo(url, timeoutMs).first
 
     // --- High level operations (pure — results applied by the caller) -------
     fun fetchSubLegacy(url: String): SubFetchResult = try {
-        val (body, info) = fetchWithInfo(url)
+        val (body, info) = fetchChain(url, null)
         val links = parseBody(body)
         val fresh = links.map { p ->
             ProfileRec(

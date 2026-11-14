@@ -232,24 +232,27 @@ object Connector {
         }
     }
 
-    /** TCP handshake ping of every server, 6 at a time, hard deadlines. */
+    /**
+     * v2.2.0 — REAL delay test of every server through the core (CorePing),
+     * replacing the raw TCP handshake that reported great-looking pings for
+     * poisoned/unreachable servers. Android parity: the phone always measured
+     * through the core (CoreTestService → measureOutboundDelay).
+     */
     fun testAll() {
         if (Store.testing || Store.profiles.isEmpty()) return
         Store.testing = true
         Store.ui.launch {
-            Store.busyMsg = "در حال تست پینگ همه سرورها…"
-            val targets = Store.profiles.mapNotNull { p ->
-                ServerInfo.hostPort(p.link)?.let { Triple(p.id, it.first, it.second) }
+            val total = Store.profiles.size
+            Store.busyMsg = "در حال تست واقعی سرورها (از طریق هسته)… 0/$total"
+            try {
+                CorePing.testAll(
+                    Store.profiles.toList(),
+                    record = { id, ms -> Store.recordPing(id, ms) },
+                    progress = { done, t -> Store.busyMsg = "در حال تست واقعی سرورها (از طریق هسته)… $done/$t" },
+                )
+            } catch (t: Throwable) {
+                Store.toast("خطا در تست سرورها: ${t.message?.take(80) ?: t.javaClass.simpleName}")
             }
-            val sem = Semaphore(6)
-            targets.map { (id, host, port) ->
-                launch(Dispatchers.IO) {
-                    sem.withPermit {
-                        val ms = PingTest.tcpBounded(host, port)
-                        Store.recordPing(id, ms)
-                    }
-                }
-            }.joinAll()
             Store.busyMsg = null
             Store.testing = false
             Store.save()
@@ -437,8 +440,11 @@ object Connector {
  */
 object UpdateChecker {
     fun probe(): Pair<String, String>? = try {
+        // v2.2.0: NO_PROXY — the update check used to inherit the Windows
+        // system proxy; with a stale proxy registered it never reported a
+        // newer release (or worse, failed noisily).
         val con = java.net.URL("https://api.github.com/repos/sahandmarami/Zero-VPN/releases/latest")
-            .openConnection() as java.net.HttpURLConnection
+            .openConnection(java.net.Proxy.NO_PROXY) as java.net.HttpURLConnection
         con.connectTimeout = 8000
         con.readTimeout = 8000
         con.setRequestProperty("User-Agent", "ZeroVPN/$APP_VERSION")
