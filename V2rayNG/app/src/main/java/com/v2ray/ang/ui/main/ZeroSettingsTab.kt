@@ -40,6 +40,8 @@ import com.v2ray.ang.handler.CoreUpdateManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.MmkvManager.rememberMmkvBool
 import com.v2ray.ang.handler.MmkvManager.rememberMmkvString
+import com.v2ray.ang.ui.compose.InputDialog
+import com.v2ray.ang.ui.compose.InputField
 import com.v2ray.ang.ui.compose.SettingsListItem
 import com.v2ray.ang.ui.compose.SettingsMenuItem
 import com.v2ray.ang.ui.compose.SettingsSwitchItem
@@ -69,6 +71,12 @@ fun ZeroSettingsTab(
     var uiModeNight by rememberMmkvString(AppConfig.PREF_UI_MODE_NIGHT, "0")
     var mode by rememberMmkvString(AppConfig.PREF_MODE, VPN)
     var autoUpdate by rememberMmkvBool(AppConfig.PREF_AUTO_UPDATE, true)
+    // v2.1.0 — Tor chain (Orbot)
+    var torChain by rememberMmkvBool(AppConfig.PREF_TOR_CHAIN, false)
+    var torPort by remember {
+        mutableStateOf(MmkvManager.decodeSettingsString(AppConfig.PREF_TOR_SOCKS_PORT) ?: "9050")
+    }
+    var showTorPort by remember { mutableStateOf(false) }
 
     val languageEntries = stringArrayResource(R.array.language_select).toList()
     val languageValues = stringArrayResource(R.array.language_select_value).toList()
@@ -136,6 +144,20 @@ fun ZeroSettingsTab(
             )
         }
 
+        ZeroSettingsGroup(stringResource(R.string.zero_tor_chain)) {
+            SettingsSwitchItem(
+                title = stringResource(R.string.zero_tor_chain),
+                summary = stringResource(R.string.zero_tor_summary),
+                checked = torChain,
+                onCheckedChange = { torChain = it }
+            )
+            SettingsMenuItem(
+                title = stringResource(R.string.zero_tor_port),
+                subtitle = "$torPort — " + stringResource(R.string.zero_tor_port_hint),
+                onClick = { showTorPort = true }
+            )
+        }
+
         ZeroSettingsGroup(stringResource(R.string.zero_set_update)) {
             SettingsSwitchItem(
                 title = stringResource(R.string.zero_auto_update),
@@ -172,6 +194,24 @@ fun ZeroSettingsTab(
         }
 
         Spacer(Modifier.height(24.dp))
+    }
+
+    if (showTorPort) {
+        InputDialog(
+            title = stringResource(R.string.zero_tor_port),
+            fields = listOf(InputField(label = stringResource(R.string.zero_tor_port), value = torPort)),
+            onFieldChange = { _, v -> torPort = v.filter { it.isDigit() }.take(5) },
+            confirmText = stringResource(android.R.string.ok),
+            dismissText = stringResource(android.R.string.cancel),
+            onConfirm = {
+                MmkvManager.encodeSettings(
+                    AppConfig.PREF_TOR_SOCKS_PORT,
+                    (torPort.toIntOrNull()?.coerceIn(1024, 65530) ?: 9050).toString()
+                )
+                showTorPort = false
+            },
+            onDismiss = { showTorPort = false }
+        )
     }
 }
 

@@ -140,11 +140,19 @@ fun ZeroSidebar() {
             .border(width = 1.dp, color = t.cardBorder)
             .padding(14.dp)
     ) {
-        // Brand
+        // Brand — v2.1.0: gradient plate behind the logo (aurora identity)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            val logoPainter = remember { loadLogoPainter() }
-            logoPainter?.let {
-                Image(painter = it, contentDescription = null, modifier = Modifier.size(34.dp))
+            Box(
+                Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(11.dp))
+                    .background(heroGradient)
+                    .padding(5.dp)
+            ) {
+                val logoPainter = remember { loadLogoPainter() }
+                logoPainter?.let {
+                    Image(painter = it, contentDescription = null, modifier = Modifier.fillMaxSize())
+                }
             }
             Spacer(Modifier.width(9.dp))
             Column {
@@ -215,7 +223,7 @@ private fun ZeroNavRow(tab: ZeroTab, selected: Boolean, onClick: () -> Unit) {
             .fillMaxWidth()
             .padding(vertical = 3.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) t.selectedRowBg else Color.Transparent)
+            .background(if (selected) heroGradient else SolidColor(Color.Transparent))
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -223,7 +231,7 @@ private fun ZeroNavRow(tab: ZeroTab, selected: Boolean, onClick: () -> Unit) {
         Icon(
             imageVector = tab.icon,
             contentDescription = tab.label,
-            tint = if (selected) t.accent else t.textSecondary,
+            tint = if (selected) Color.White else t.textSecondary,
             modifier = Modifier.size(20.dp)
         )
         Spacer(Modifier.width(10.dp))
@@ -231,20 +239,20 @@ private fun ZeroNavRow(tab: ZeroTab, selected: Boolean, onClick: () -> Unit) {
             tab.label,
             fontSize = 14.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-            color = if (selected) t.accent else t.textPrimary
+            color = if (selected) Color.White else t.textPrimary
         )
         Spacer(Modifier.weight(1f))
         if (tab == ZeroTab.SERVERS && Store.profiles.isNotEmpty()) {
             Box(
                 Modifier
                     .clip(RoundedCornerShape(50))
-                    .background(t.pillBg)
+                    .background(if (selected) Color.White.copy(alpha = 0.25f) else t.pillBg)
                     .padding(horizontal = 8.dp, vertical = 2.dp)
             ) {
                 Text(
                     Store.profiles.size.toString(),
                     fontSize = 11.sp,
-                    color = t.textSecondary
+                    color = if (selected) Color.White else t.textSecondary
                 )
             }
         }
@@ -283,6 +291,12 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 22.dp, vertical = 18.dp)
     ) {
+        // --- Update banner (v2.1.0) ----------------------------------------
+        Store.updateVersion?.let { ver ->
+            UpdateBanner(version = ver, onDownload = { Connector.openReleasePage() })
+            Spacer(Modifier.height(12.dp))
+        }
+
         // --- Connection hero card ------------------------------------------
         ZeroCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -343,6 +357,22 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false)
                         )
+                        if (Store.data.settings.torChain) {
+                            Spacer(Modifier.width(8.dp))
+                            Box(
+                                Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(heroGradient)
+                                    .padding(horizontal = 9.dp, vertical = 3.dp)
+                            ) {
+                                Text(
+                                    "از طریق تور",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -499,7 +529,7 @@ fun ZeroConnectButton(
             .clip(CircleShape)
             .background(
                 brush = when {
-                    connected -> accentGradient
+                    connected -> heroGradient
                     isConnecting -> Brush.verticalGradient(
                         listOf(t.pillBg, t.pillBg)
                     )
@@ -737,6 +767,46 @@ fun ZeroServerCard(
 // ---------------------------------------------------------------------------
 // Banners
 // ---------------------------------------------------------------------------
+/** Newer release banner — gradient-edged card, one-tap download. */
+@Composable
+fun UpdateBanner(version: String, onDownload: () -> Unit) {
+    val t = currentTheme
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(t.accent.copy(alpha = 0.10f))
+            .border(1.dp, t.accent.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .background(heroGradient),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(ZeroIcons.download, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+        }
+        Spacer(Modifier.width(11.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                "نسخه جدید $version منتشر شد",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = t.textPrimary
+            )
+            Text(
+                "برای رفع خطاها و بهبود سرعت، بروزرسانی کنید",
+                fontSize = 11.sp,
+                color = t.textSecondary
+            )
+        }
+        ZeroChip("دانلود", primary = true) { onDownload() }
+    }
+}
+
 @Composable
 fun BusyBanner(msg: String, modifier: Modifier = Modifier) {
     val t = currentTheme

@@ -177,6 +177,11 @@ fun exitApplication() {
 }
 
 fun main() {
+    // The DoH-IP subscription fallback dials the resolved IP while keeping the
+    // original Host header — Java blocks manual Host headers unless this is
+    // set BEFORE the first HttpURLConnection class-load.
+    try { System.setProperty("sun.net.http.allowRestrictedHeaders", "true") } catch (_: Throwable) { }
+
     // Crash diagnostics (v2.0.1): the compose-desktop default handler shows a
     // dead-end "Error" dialog and leaves nothing to debug from. Append the
     // full trace to %APPDATA%/ZeroVPN/crash.log so a user screenshot of the
@@ -243,6 +248,10 @@ fun main() {
         val v = Engine.probeVersion()
         if (v != null) Store.ui.launch { Store.coreVersion = v }
     }
+
+    // v2.1.0 — silent update check on every launch (the desktop app had no
+    // updater at all; users kept running builds with already-fixed bugs).
+    Connector.checkForUpdate()
 
     // Loopback IPC: a second launch resurfaces this window (before any
     // composition — a one-time side effect, not a composition-time write).

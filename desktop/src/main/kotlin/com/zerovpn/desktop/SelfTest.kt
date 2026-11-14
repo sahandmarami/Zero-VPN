@@ -149,7 +149,34 @@ fun main(args: Array<String>) {
     println(if (bundledOk) "OK    bundled flag resource resolvable" else "FAIL  bundled flag resource")
     if (bundledOk) ok++
 
-    val expected = samples.size + 11
+    // 11) v2.1.0: Tor chain — buildFullConfig with a Tor port wraps the main
+    //     outbound behind a tor-chain SOCKS outbound (proxySettings.tag).
+    val torCfg = XrayConfig.buildFullConfig(samples[1], 10808, 10809, 10810, 9050)
+    val torOut = torCfg?.get("outbounds").toString()
+    val torOk = torOut.contains("\"tor-chain\"") && torOut.contains("\"proxySettings\"") &&
+        torOut.contains("127.0.0.1")
+    println(if (torOk) "OK    tor-chain config (proxySettings + socks outbound)" else "FAIL  tor-chain config")
+    if (torOk) ok++
+
+    // 12) v2.1.0: plain (no-Tor) config must NOT contain the chain
+    val plainCfg = XrayConfig.buildFullConfig(samples[1], 10808, 10809, 10810)?.toString() ?: ""
+    val plainOk2 = !plainCfg.contains("tor-chain")
+    println(if (plainOk2) "OK    non-tor config has no chain" else "FAIL  non-tor config leaked chain")
+    if (plainOk2) ok++
+
+    // 13) v2.1.0: Tor port candidates — preferred first, then the two well-known\n    //     defaults, deduplicated (9150 Tor Browser, 9050 Orbot/Expert Bundle)
+    val cand = TorProbe.candidatePorts(9150)
+    val candOk = cand == listOf(9150, 9050)
+    println(if (candOk) "OK    tor probe port candidates (deduped, preferred first)" else "FAIL  tor probe candidates: $cand")
+    if (candOk) ok++
+
+    // 14) v2.1.0: update-check version comparison
+    val verOk = UpdateChecker.isNewer("2.1.0", "2.0.1") && !UpdateChecker.isNewer("2.0.1", "2.1.0") &&
+        UpdateChecker.isNewer("2.10.0", "2.9.9") && !UpdateChecker.isNewer("2.1.0", "2.1.0")
+    println(if (verOk) "OK    update version compare" else "FAIL  update version compare")
+    if (verOk) ok++
+
+    val expected = samples.size + 15
     println(
         if (ok == expected && full != null) "SELFTEST PASS ($ok/$expected)"
         else "SELFTEST FAIL ($ok expected $expected)"

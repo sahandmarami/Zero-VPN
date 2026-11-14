@@ -37,6 +37,10 @@
     <string name="zero_update_downloaded">نسخه جدید دانلود شد — برای نصب، بنر آپدیت را بزنید</string>
     <string name="zero_set_per_app_hint">انتخاب برنامه‌هایی که از VPN عبور می‌کنند</string>
     <string name="zero_set_routing_hint">قوانین مسیریابی و دامنه‌ها</string>
+    <string name="zero_tor_chain">زنجیره تور (اوربوت)</string>
+    <string name="zero_tor_summary">ترافیک اول از Tor محلی عبور می‌کند و بعد به سرور می‌رسد (اوربوت باید اجرا باشد)</string>
+    <string name="zero_tor_port">پورت SOCKS تور</string>
+    <string name="zero_tor_port_hint">پورت پیش‌فرض اوربوت ۹۰۵۰ است</string>
     <!-- Zero VPN WireGuard -->
     <string name="zero_awg_notice">پروفایل AmneziaWG ایمپورت شد — موتور اختصاصی امنیزیا فعال می‌شود ✓</string>
     <string name="app_widget_name">تعویض</string>

@@ -26,6 +26,10 @@ object CoreConfigManager {
     private var initConfigCache: String? = null
     private var initConfigCacheWithTun: String? = null
 
+    /** v2.1.0 — Tor chain only applies to TCP-transport protocols (a dialer
+     *  proxy cannot carry the QUIC/UDP-based Hysteria2/WireGuard outbounds). */
+    private val TOR_CHAIN_CAPABLE_PROTOCOLS = setOf("vmess", "vless", "trojan", "shadowsocks")
+
     //region get config function
 
     /**
@@ -296,6 +300,36 @@ object CoreConfigManager {
             return
         }
         outbound.tag = resolvedOutbound.tag
+
+        // v2.1.0 — Tor chain (v2rayNG/Orbot parity): the server outbound dials
+        // THROUGH a local Tor SOCKS port first (sockopt.dialerProxy), then the
+        // normal server handshake happens on top of Tor. Applied only to the
+        // TCP-transport protocols; QUIC/UDP-based ones (Hysteria2, WireGuard)
+        // cannot pass through a dialer proxy.
+        val torChainEnabled =
+            MmkvManager.decodeSettingsBool(AppConfig.PREF_TOR_CHAIN, false) == true &&
+                outbound.protocol in TOR_CHAIN_CAPABLE_PROTOCOLS
+        if (torChainEnabled) {
+            val torPort = MmkvManager.decodeSettingsString(AppConfig.PREF_TOR_SOCKS_PORT)
+                ?.toIntOrNull()?.coerceIn(1024, 65530) ?: 9050
+            outbound.ensureSockopt().dialerProxy = AppConfig.TAG_TOR_CHAIN
+            // XTLS vision cannot run on top of a dialer proxy — drop it so the core starts cleanly.
+            outbound.settings?.flow?.takeIf { it.startsWith("xtls") }?.let {
+                outbound.settings?.flow = ""
+            }
+            val torOutbound = V2rayConfig.OutboundBean(
+                tag = AppConfig.TAG_TOR_CHAIN,
+                protocol = EConfigType.SOCKS.name.lowercase(),
+            ).apply {
+                settings = V2rayConfig.OutboundBean.OutSettingsBean().apply {
+                    address = "127.0.0.1"
+                    port = torPort
+                }
+            }
+            // Order in the array is irrelevant to Xray (tags are referenced by name).
+            v2rayConfig.outbounds.add(torOutbound)
+        }
+
         if (prepend) {
             v2rayConfig.outbounds.add(0, outbound)
         } else {

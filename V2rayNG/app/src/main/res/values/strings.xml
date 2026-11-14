@@ -37,6 +37,10 @@
     <string name="zero_update_downloaded">New version downloaded — tap the update banner to install</string>
     <string name="zero_set_per_app_hint">Choose which apps go through the VPN</string>
     <string name="zero_set_routing_hint">Routing rules and domains</string>
+    <string name="zero_tor_chain">Tor chain (Orbot)</string>
+    <string name="zero_tor_summary">Send traffic first through local Tor, then to the server (Orbot must be running)</string>
+    <string name="zero_tor_port">Tor SOCKS port</string>
+    <string name="zero_tor_port_hint">Orbot default is 9050</string>
     <!-- Zero VPN WireGuard -->
     <string name="zero_awg_notice">AmneziaWG profile imported — the dedicated Amnezia engine will run it ✓</string>
     <string name="app_widget_name">Switch</string>

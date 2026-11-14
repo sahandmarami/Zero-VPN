@@ -48,6 +48,11 @@ data class SettingsRec(
     // v2rayNG-style behaviour: selecting another server while connected
     // restarts the tunnel with the new server — no manual disconnect needed.
     val autoSwitch: Boolean = true,
+    // v2.1.0 — chain the tunnel through a local Tor SOCKS port (Orbot on
+    // Android, Tor Expert Bundle / Tor Browser on Windows) before the proxy
+    // server. 0 = disabled.
+    val torChain: Boolean = false,
+    val torPort: Int = 9050,
 )
 
 @Serializable
@@ -61,7 +66,10 @@ data class DataFile(
 
 enum class ConnStatus { DISCONNECTED, CONNECTING, CONNECTED }
 
-const val APP_VERSION = "2.0.1"
+const val APP_VERSION = "2.1.0"
+
+/** Release page opened by the update banner. */
+const val RELEASES_URL = "https://github.com/sahandmarami/Zero-VPN/releases/latest"
 
 /**
  * Posts an observable-state write onto the EDT — always DEFERRED, never
@@ -159,6 +167,10 @@ object Store {
     var groupChosenExplicit by mutableStateOf(false)
     /** xray.exe version string — filled once at startup by the version probe. */
     var coreVersion by mutableStateOf<String?>(null)
+    /** Newer release tag found by the startup update check (null = none). */
+    var updateVersion by mutableStateOf<String?>(null)
+    /** HTML URL of the newer release (fallback: RELEASES_URL). */
+    var updateUrl by mutableStateOf<String?>(null)
 
     val pingMap = mutableStateMapOf<String, Long>()
 
@@ -279,6 +291,17 @@ object Store {
     /** autoSwitch only applies from the NEXT start of the tunnel. */
     fun setAutoSwitch(v: Boolean) {
         data = data.copy(settings = data.settings.copy(autoSwitch = v))
+        save()
+    }
+
+    fun setTorChain(v: Boolean) {
+        data = data.copy(settings = data.settings.copy(torChain = v))
+        save()
+    }
+
+    fun setTorPort(p: Int) {
+        val port = p.coerceIn(1024, 65530)
+        data = data.copy(settings = data.settings.copy(torPort = port))
         save()
     }
 

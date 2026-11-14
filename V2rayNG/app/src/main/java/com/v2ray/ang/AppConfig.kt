@@ -71,6 +71,10 @@ object AppConfig {
     const val PREF_SOCKS_USERNAME = "pref_socks_username"
     const val PREF_SOCKS_PASSWORD = "pref_socks_password"
     const val PREF_SOCKS_ENABLE_UDP = "pref_socks_enable_udp"
+    // v2.1.0 — Tor chain (v2rayNG/Orbot parity): dial the proxy server
+    // THROUGH a local Tor SOCKS port before reaching the server.
+    const val PREF_TOR_CHAIN = "pref_tor_chain"
+    const val PREF_TOR_SOCKS_PORT = "pref_tor_socks_port"
     const val PREF_REMOTE_DNS = "pref_remote_dns"
     const val PREF_DOMESTIC_DNS = "pref_domestic_dns"
     const val PREF_DNS_HOSTS = "pref_dns_hosts"
@@ -117,6 +121,7 @@ object AppConfig {
     const val TAG_BLOCKED = "block"
     const val TAG_FRAGMENT = "fragment"
     const val TAG_DNS = "dns-module"
+    const val TAG_TOR_CHAIN = "tor-chain"
     const val TAG_DOMESTIC_DNS = "domestic-dns"
     const val TAG_BALANCER = "balancer-main"
     const val TAG_BALANCER_PRE = "balancer"

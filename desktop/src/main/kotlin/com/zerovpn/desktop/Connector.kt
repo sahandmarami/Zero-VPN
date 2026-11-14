@@ -51,8 +51,26 @@ object Connector {
             val socks = Store.socksPort
             val http = Store.httpPort
             val api = Store.apiPort
+            // v2.1.0 — Tor chain: if enabled, a REAL local Tor SOCKS port must
+            // answer a SOCKS5 handshake before we build the config; the tunnel
+            // then dials through Tor (Orbot / Tor Expert Bundle / Tor Browser).
+            var torPort: Int? = null
+            if (Store.data.settings.torChain) {
+                val alive = withContext(Dispatchers.IO) {
+                    TorProbe.findAliveSocks(Store.data.settings.torPort)
+                }
+                if (alive == null) {
+                    Store.status = ConnStatus.DISCONNECTED
+                    Store.toast(
+                        "تور پیدا نشد — Orbot یا Tor را اجرا کنید (پورت 9050/9150) " +
+                            "و مطمئن شوید گزینه \u200cاجازه اتصال محلی\u200c فعال است"
+                    )
+                    return@launch
+                }
+                torPort = alive
+            }
             val cfg = withContext(Dispatchers.IO) {
-                XrayConfig.buildFullConfig(p.link, socks, http, api)
+                XrayConfig.buildFullConfig(p.link, socks, http, api, torPort)
             }
             if (cfg == null) {
                 Store.status = ConnStatus.DISCONNECTED
@@ -250,9 +268,12 @@ object Connector {
             val subs = Store.subscriptions.toList()
             var added = 0
             var err: String? = null
+            val viaTunnel = Store.status == ConnStatus.CONNECTED
             for (sub in subs) {
                 Store.busyMsg = "در حال دریافت: ${sub.name}"
-                val res = withContext(Dispatchers.IO) { Profiles.fetchSub(sub.url) }
+                val res = withContext(Dispatchers.IO) {
+                    Profiles.fetchSub(sub.url, socksPort = if (viaTunnel) Store.socksPort else null)
+                }
                 if (res.error != null) {
                     err = res.error
                 } else {
@@ -277,7 +298,12 @@ object Connector {
         Store.testing = true
         Store.ui.launch {
             Store.busyMsg = "در حال دریافت: ${sub.name}"
-            val res = withContext(Dispatchers.IO) { Profiles.fetchSub(url) }
+            val res = withContext(Dispatchers.IO) {
+                Profiles.fetchSub(
+                    url,
+                    socksPort = if (Store.status == ConnStatus.CONNECTED) Store.socksPort else null,
+                )
+            }
             Store.busyMsg = null
             Store.testing = false
             if (res.error != null) {
@@ -293,7 +319,12 @@ object Connector {
         Store.testing = true
         Store.ui.launch {
             Store.busyMsg = "در حال دریافت اشتراک…"
-            val res = withContext(Dispatchers.IO) { Profiles.fetchSub(url) }
+            val res = withContext(Dispatchers.IO) {
+                Profiles.fetchSub(
+                    url,
+                    socksPort = if (Store.status == ConnStatus.CONNECTED) Store.socksPort else null,
+                )
+            }
             if (res.error != null || res.profiles.isEmpty()) {
                 Store.busyMsg = null
                 Store.testing = false
@@ -359,6 +390,85 @@ object Connector {
                 Store.toast("${recs.size} کانفیگ اضافه شد")
             }
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Update check (v2.1.0) — the desktop app had NO updater at all, so users
+    // kept running builds whose bugs were already fixed in newer releases
+    // (the persistent "servers screen errors" report was v2.0.0's crash that
+    // v2.0.1 had already fixed). Every launch now checks the GitHub latest
+    // release silently; the Home screen shows a banner when a newer build
+    // exists, and Settings has a manual re-check row.
+    // -------------------------------------------------------------------------
+    fun checkForUpdate() {
+        Store.io.launch {
+            val found = UpdateChecker.probe()
+            if (found != null) {
+                Store.ui.launch {
+                    Store.updateVersion = found.first
+                    Store.updateUrl = found.second
+                }
+            }
+        }
+    }
+
+    fun openReleasePage() {
+        val url = Store.updateUrl ?: RELEASES_URL
+        try {
+            if (Store.isWindows) {
+                ProcessBuilder("rundll32", "url.dll,FileProtocolHandler", url).start()
+            } else if (java.awt.Desktop.isDesktopSupported()) {
+                java.awt.Desktop.getDesktop().browse(java.net.URI(url))
+            } else {
+                setClipboard(url)
+                Store.toast("لینک دانلود کپی شد")
+            }
+        } catch (_: Throwable) {
+            setClipboard(url)
+            Store.toast("لینک دانلود کپی شد")
+        }
+    }
+}
+
+/**
+ * GitHub latest-release probe — silent, short-deadline, never throws.
+ * api.github.com may itself be unreachable on some networks; the check is
+ * best-effort and the manual "بررسی بروزرسانی" row in Settings retries it.
+ */
+object UpdateChecker {
+    fun probe(): Pair<String, String>? = try {
+        val con = java.net.URL("https://api.github.com/repos/sahandmarami/Zero-VPN/releases/latest")
+            .openConnection() as java.net.HttpURLConnection
+        con.connectTimeout = 8000
+        con.readTimeout = 8000
+        con.setRequestProperty("User-Agent", "ZeroVPN/$APP_VERSION")
+        con.setRequestProperty("Accept", "application/vnd.github+json")
+        if (con.responseCode !in 200..299) null
+        else {
+            val body = con.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+            val json = kotlinx.serialization.json.Json.parseToJsonElement(body)
+                .let { it as? kotlinx.serialization.json.JsonObject }
+            val tag = json?.get("tag_name")?.toString()?.trim('"')
+            val html = json?.get("html_url")?.toString()?.trim('"')
+            val cleanTag = tag?.removePrefix("v")
+            if (!cleanTag.isNullOrBlank() && isNewer(cleanTag, APP_VERSION)) {
+                cleanTag to (html?.takeIf { it.isNotBlank() } ?: RELEASES_URL)
+            } else null
+        }
+    } catch (_: Throwable) {
+        null
+    }
+
+    /** Semantic-ish compare: "2.1.0" > "2.0.1". */
+    fun isNewer(candidate: String, current: String): Boolean {
+        val a = candidate.split('.').map { it.filter { ch -> ch.isDigit() }.toIntOrNull() ?: 0 }
+        val b = current.split('.').map { it.filter { ch -> ch.isDigit() }.toIntOrNull() ?: 0 }
+        for (i in 0 until maxOf(a.size, b.size)) {
+            val x = a.getOrElse(i) { 0 }
+            val y = b.getOrElse(i) { 0 }
+            if (x != y) return x > y
+        }
+        return false
     }
 }
 

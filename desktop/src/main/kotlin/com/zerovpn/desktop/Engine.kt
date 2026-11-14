@@ -31,9 +31,31 @@ object XrayConfig {
      *  - loopback dokodemo-door `api-in` on apiPort routed to the built-in
      *    `api` outbound (StatsService) — queried by StatsClient every second
      *    while the tunnel is up (same data source v2rayN uses).
+     *  v2.1.0 (Tor chain): when torSocksPort != null the main outbound dials
+     *  THROUGH a local Tor SOCKS port first (Orbot / Tor Expert Bundle),
+     *  exactly the chain v2rayNG users build by hand — a `tor-chain` socks
+     *  outbound plus `proxySettings.tag` on the main outbound.
      */
-    fun buildFullConfig(link: String, socksPort: Int, httpPort: Int, apiPort: Int): JsonObject? {
+    fun buildFullConfig(
+        link: String,
+        socksPort: Int,
+        httpPort: Int,
+        apiPort: Int,
+        torSocksPort: Int? = null,
+    ): JsonObject? {
         val outbound = buildOutbound(link) ?: return null
+        val chained = if (torSocksPort != null) {
+            buildJsonObject {
+                put("tag", "proxy")
+                put("protocol", outbound["protocol"]?.toString()?.trim('"') ?: "")
+                put("settings", outbound["settings"] ?: buildJsonObject { })
+                put("streamSettings", outbound["streamSettings"] ?: buildJsonObject { })
+                outbound["mux"]?.let { put("mux", it) }
+                put("proxySettings", buildJsonObject {
+                    put("tag", "tor-chain")
+                })
+            }
+        } else outbound
         return buildJsonObject {
             put("log", buildJsonObject {
                 put("loglevel", "warning")
@@ -92,7 +114,21 @@ object XrayConfig {
                 })
             })
             put("outbounds", buildJsonArray {
-                add(outbound)
+                add(chained)
+                if (torSocksPort != null) {
+                    add(buildJsonObject {
+                        put("tag", "tor-chain")
+                        put("protocol", "socks")
+                        put("settings", buildJsonObject {
+                            put("servers", buildJsonArray {
+                                add(buildJsonObject {
+                                    put("address", "127.0.0.1")
+                                    put("port", torSocksPort)
+                                })
+                            })
+                        })
+                    })
+                }
                 add(buildJsonObject {
                     put("tag", "direct")
                     put("protocol", "freedom")
@@ -550,6 +586,47 @@ object Engine {
 }
 
 // ---------------------------------------------------------------------------
+// Tor probe (v2.1.0) — is a local Tor SOCKS port actually alive?
+// A plain TCP connect is NOT enough (any listener answers); a real SOCKS5
+// handshake is sent and the reply must be 0x05 0x00 (no-auth accepted).
+// Tor Browser's bundled daemon listens on 9150, Orbot / Expert Bundle on 9050.
+// ---------------------------------------------------------------------------
+object TorProbe {
+
+    fun candidatePorts(preferred: Int): List<Int> =
+        listOf(preferred, 9050, 9150).distinct()
+
+    /** First port that answers a SOCKS5 no-auth handshake, or null. */
+    fun findAliveSocks(preferred: Int): Int? {
+        for (port in candidatePorts(preferred)) {
+            if (socksAlive(port)) return port
+        }
+        return null
+    }
+
+    fun socksAlive(port: Int, timeoutMs: Int = 900): Boolean = try {
+        Socket().use { s ->
+            s.connect(InetSocketAddress("127.0.0.1", port), timeoutMs)
+            s.soTimeout = timeoutMs
+            val out = s.getOutputStream()
+            out.write(byteArrayOf(0x05, 0x01, 0x00))
+            out.flush()
+            val reply = ByteArray(2)
+            var read = 0
+            val input = s.getInputStream()
+            while (read < 2) {
+                val n = input.read(reply, read, 2 - read)
+                if (n < 0) break
+                read += n
+            }
+            read == 2 && reply[0] == 0x05.toByte() && reply[1] == 0x00.toByte()
+        }
+    } catch (_: Throwable) {
+        false
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Windows system proxy (WinINET) via reg.exe + rundll32 refresh
 // ---------------------------------------------------------------------------
 object SysProxy {
@@ -669,10 +746,18 @@ object PingTest {
         emptyList()
     }
 
-    /** Best-effort DNS-over-HTTPS (JSON) — only used when system DNS fails. */
-    private fun dohResolve(host: String): List<java.net.InetAddress> {
+    /**
+     * Best-effort DNS-over-HTTPS (JSON) — only used when system DNS fails.
+     * v2.1.0: the IP-hosted endpoints (1.1.1.1 / 1.0.0.1) come FIRST — they
+     * need NO working DNS at all, so they still answer on poisoned Iranian
+     * resolvers where dns.google / cloudflare-dns.com (domain-based) are
+     * unreachable or themselves blocked.
+     */
+    fun dohResolve(host: String): List<java.net.InetAddress> {
         val q = java.net.URLEncoder.encode(host, "UTF-8")
         val endpoints = listOf(
+            "https://1.1.1.1/dns-query?name=$q&type=A",
+            "https://1.0.0.1/dns-query?name=$q&type=A",
             "https://dns.google/resolve?name=$q&type=A",
             "https://cloudflare-dns.com/dns-query?name=$q&type=A",
         )

@@ -562,6 +562,7 @@ private fun ServerRow(
 fun SettingsScreen(modifier: Modifier = Modifier) {
     val t = currentTheme
     var showPort by remember { mutableStateOf(false) }
+    var showTorPort by remember { mutableStateOf(false) }
     var deleteSubTarget by remember { mutableStateOf<SubRec?>(null) }
 
     Column(
@@ -601,6 +602,29 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 title = "بروزرسانی همه اشتراک‌ها",
                 value = "",
                 onClick = { Connector.updateSubs() }
+            )
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        // v2.1.0 — Tor chain (v2rayNG/Orbot parity)
+        SettingsGroup("زنجیره تور (Tor)") {
+            SettingsSwitch(
+                title = "عبور ترافیک از تور",
+                subtitle = "ترافیک اول از Tor محلی عبور می‌کند و بعد به سرور می‌رسد",
+                checked = Store.data.settings.torChain,
+                onChange = { Store.setTorChain(it) }
+            )
+            SettingsRow(
+                title = "پورت SOCKS تور",
+                value = "${Store.data.settings.torPort} (خودکار: 9050/9150)",
+                onClick = { showTorPort = true }
+            )
+            Text(
+                "راهنما: روی گوشی Orbot را نصب و اجرا کنید؛ در ویندوز Tor Browser (پورت 9150) یا Tor Expert Bundle (9050) کافی است. اگر تور پیدا نشود، اتصال با پیام خطا متوقف می‌شود.",
+                fontSize = 11.sp,
+                color = t.textSecondary,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)
             )
         }
 
@@ -664,6 +688,17 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 onClick = { }
             )
             SettingsRow(
+                title = if (Store.updateVersion != null) "نسخه جدید موجود: ${Store.updateVersion}" else "بررسی بروزرسانی برنامه",
+                value = if (Store.updateVersion != null) "دانلود" else "",
+                onClick = {
+                    if (Store.updateVersion != null) Connector.openReleasePage()
+                    else {
+                        Connector.checkForUpdate()
+                        Store.toast("در حال بررسی نسخه جدید…")
+                    }
+                }
+            )
+            SettingsRow(
                 title = "مشاهده گزارش هسته",
                 value = "",
                 onClick = { Store.view = "logs" }
@@ -686,6 +721,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     }
 
     if (showPort) PortDialog(onDismiss = { showPort = false })
+    if (showTorPort) TorPortDialog(onDismiss = { showTorPort = false })
     deleteSubTarget?.let { target ->
         ConfirmDialog(
             title = "حذف اشتراک",
@@ -965,6 +1001,37 @@ private fun RenameDialog(
                 if (t.isNotEmpty()) {
                     onDismiss()
                     onConfirm(t)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TorPortDialog(onDismiss: () -> Unit) {
+    var portText by remember { mutableStateOf(Store.data.settings.torPort.toString()) }
+    DialogShell {
+        Text("پورت SOCKS تور", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Orbot و Tor Expert Bundle روی 9050 و Tor Browser روی 9150 گوش می‌دهند. اگر این پورت پاسخ ندهد، پورت‌های پیش‌فرض خودکار امتحان می‌شوند.",
+            fontSize = 11.sp,
+            color = currentTheme.textSecondary
+        )
+        Spacer(Modifier.height(10.dp))
+        ZeroTextField(
+            value = portText,
+            onValueChange = { portText = it.filter { ch -> ch.isDigit() }.take(5) },
+            placeholder = "9050",
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ZeroChip("انصراف", primary = false, modifier = Modifier.weight(1f)) { onDismiss() }
+            ZeroChip("ذخیره", primary = true, modifier = Modifier.weight(1f)) {
+                portText.toIntOrNull()?.let {
+                    Store.setTorPort(it)
+                    onDismiss()
+                    Store.toast("پورت تور ذخیره شد")
                 }
             }
         }
