@@ -112,6 +112,7 @@ object XrayConfig {
             sni = s("sni").ifBlank { s("host") },
             alpn = s("alpn"),
             fp = s("fp"),
+            cs = s("cs"),                     // cipherSuites (anti-NIN), v2rayNG 2.3.x parity
             pbk = "", sid = "", spx = "",
             allowInsecure = false,
         )
@@ -146,7 +147,15 @@ object XrayConfig {
         val host = uri.host ?: ""
         val port = if (uri.port > 0) uri.port else 443
         val net = (q["type"] ?: q["network"] ?: "tcp").lowercase()
-        val security = (q["security"] ?: if (port == 443) "tls" else "none").lowercase()
+        // Upstream v2rayNG parity (FmtBase.getItemFormQuery): any security
+        // other than tls/reality — including a MISSING parameter — means
+        // plain, even on port 443. The old 443→tls guess broke the unencrypted
+        // (PattNG-style) special configs that run on 443.
+        val security = when ((q["security"] ?: "none").lowercase()) {
+            "tls" -> "tls"
+            "reality" -> "reality"
+            else -> "none"
+        }
         val stream = streamSettings(
             net = net,
             type = q["headerType"] ?: "",
@@ -154,9 +163,10 @@ object XrayConfig {
             path = q["path"] ?: "",
             serviceName = q["serviceName"] ?: "",
             security = security,
-            sni = q["sni"] ?: q["host"] ?: host,
+            sni = q["sni"] ?: host,
             alpn = q["alpn"] ?: "",
             fp = q["fp"] ?: "",
+            cs = q["cs"] ?: "",               // cipherSuites (anti-NIN)
             pbk = q["pbk"] ?: "",
             sid = q["sid"] ?: "",
             spx = q["spx"] ?: "",
@@ -193,16 +203,26 @@ object XrayConfig {
         val host = uri.host ?: ""
         val port = if (uri.port > 0) uri.port else 443
         val net = (q["type"] ?: "tcp").lowercase()
+        // Upstream TrojanFmt parity: no query at all → tls; with a query the
+        // security param wins verbatim (so security=none stays plain — the
+        // PattNG-style unencrypted trojan), unknown values fall back to none.
+        val security = when (q["security"]?.lowercase()) {
+            null -> "tls"
+            "tls" -> "tls"
+            "reality" -> "reality"
+            else -> "none"
+        }
         val stream = streamSettings(
             net = net,
             type = q["headerType"] ?: "",
             host = q["host"] ?: "",
             path = q["path"] ?: "",
             serviceName = q["serviceName"] ?: "",
-            security = (q["security"] ?: "tls").lowercase(),
-            sni = q["sni"] ?: q["peer"] ?: q["host"] ?: host,
+            security = security,
+            sni = q["sni"] ?: q["peer"] ?: host,
             alpn = q["alpn"] ?: "",
             fp = q["fp"] ?: "",
+            cs = q["cs"] ?: "",               // cipherSuites (anti-NIN)
             pbk = q["pbk"] ?: "",
             sid = q["sid"] ?: "",
             spx = q["spx"] ?: "",
@@ -300,7 +320,7 @@ object XrayConfig {
 
     private fun streamSettings(
         net: String, type: String, host: String, path: String, serviceName: String,
-        security: String, sni: String, alpn: String, fp: String,
+        security: String, sni: String, alpn: String, fp: String, cs: String,
         pbk: String, sid: String, spx: String, allowInsecure: Boolean,
     ): JsonObject = buildJsonObject {
         put("network", when (net) {
@@ -315,6 +335,9 @@ object XrayConfig {
                 put("allowInsecure", allowInsecure)
                 if (alpn.isNotBlank()) put("alpn", buildJsonArray { alpn.split(',').forEach { add(kotlinx.serialization.json.JsonPrimitive(it.trim())) } })
                 if (fp.isNotBlank()) put("fingerprint", fp)
+                // cipherSuites (anti-NIN) — same mapping as the Android app's
+                // CoreOutboundBuilder.populateTlsSettings (cs= share links)
+                if (cs.isNotBlank()) put("cipherSuites", cs)
             })
         } else if (security == "reality") {
             put("realitySettings", buildJsonObject {
@@ -421,6 +444,29 @@ object Engine {
         try { process?.waitFor(1500, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: Throwable) { }
         if (process?.isAlive == true) try { process?.destroyForcibly() } catch (_: Throwable) { }
         process = null
+    }
+
+    /**
+     * Tail of the core's error log, compacted to the most informative line —
+     * surfaced as the root cause when a start fails, instead of the generic
+     * "server unreachable" toast (same idea as the Android 1.5.5 snackbar fix:
+     * a long raw chain becomes a short prefix + real reason).
+     */
+    fun lastCoreError(): String? {
+        val candidates = listOf(File(Store.dataDir, "xray-error.log"), Store.logFile)
+        for (f in candidates) {
+            val lines = try {
+                if (!f.isFile) null else f.readLines().filter { it.isNotBlank() }
+            } catch (_: Throwable) { null } ?: continue
+            val hit = lines.lastOrNull {
+                it.contains("failed", true) || it.contains("error", true) ||
+                    it.contains("rejected", true) || it.contains("invalid", true)
+            } ?: continue
+            // Keep the tail of the line (the actual reason usually lives there)
+            val short = hit.trim().takeLast(160)
+            if (short.isNotBlank()) return short
+        }
+        return null
     }
 }
 

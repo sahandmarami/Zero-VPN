@@ -115,7 +115,11 @@ object Connector {
             if (!Engine.waitForPort(Store.socksPort, 12000)) {
                 Engine.stop()
                 Store.status = ConnStatus.DISCONNECTED
-                Store.toast("اتصال برقرار نشد — سرور در دسترس نیست یا پورت اشغال است")
+                val cause = Engine.lastCoreError()
+                Store.toast(
+                    if (cause != null) "اتصال برقرار نشد — $cause"
+                    else "اتصال برقرار نشد — سرور در دسترس نیست یا پورت اشغال است"
+                )
                 return@launch
             }
             if (Store.autoProxy && Store.isWindows) {

@@ -8,6 +8,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
@@ -17,11 +18,16 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.platform.Font as PlatformFont
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import androidx.compose.ui.unit.dp
+import java.io.File
+import java.io.RandomAccessFile
+import java.nio.channels.FileLock
 import javax.imageio.ImageIO
+import kotlin.system.exitProcess
 
 // ---------------------------------------------------------------------------
 // Zero VPN neon palette (matches the Android app) — theme surfaces live in
@@ -99,21 +105,96 @@ fun loadLogoPainter(): Painter? = try {
     null
 }
 
+// ---------------------------------------------------------------------------
+// Single-instance guard — a held file lock in the data dir. Prevents the
+// classic double-launch mess: second instance steals the SOCKS port (core
+// start fails with "address already in use") and both windows fight over the
+// system-proxy registry keys.
+// ---------------------------------------------------------------------------
+private object InstanceLock {
+    var channel: RandomAccessFile? = null
+    var lock: FileLock? = null
+}
+
+private fun acquireInstanceLock(): Boolean = try {
+    val f = File(Store.dataDir, "zerovpn.lock")
+    val ch = RandomAccessFile(f, "rw")
+    val l = ch.channel.tryLock()
+    if (l != null) {
+        InstanceLock.channel = ch
+        InstanceLock.lock = l
+        true
+    } else {
+        ch.close()
+        false
+    }
+} catch (_: Throwable) {
+    true // never block the app because of a lock-file hiccup
+}
+
+/** Full exit — core, system proxy, then the process. Used by tray + hooks. */
+fun exitApplication() {
+    try { Engine.stop() } catch (_: Throwable) { }
+    try { if (Store.isWindows) SysProxy.disable() } catch (_: Throwable) { }
+    try { Store.save() } catch (_: Throwable) { }
+    exitProcess(0)
+}
+
 fun main() {
     Store.load()
+
+    if (!acquireInstanceLock()) {
+        try {
+            javax.swing.JOptionPane.showMessageDialog(
+                null,
+                "Zero VPN از قبل در حال اجراست — آیکون آن کنار ساعت (system tray) است.",
+                "Zero VPN",
+                javax.swing.JOptionPane.INFORMATION_MESSAGE
+            )
+        } catch (_: Throwable) { }
+        exitProcess(0)
+    }
+
     // Clean up leftovers from a previous session
     Engine.stop()
     if (Store.isWindows) SysProxy.disable()
     Runtime.getRuntime().addShutdownHook(Thread {
         try {
             Engine.stop()
-            if (Store.isWindows && Store.proxyOn) SysProxy.disable()
+            if (Store.isWindows) SysProxy.disable()
         } catch (_: Throwable) { }
     })
+
     application {
         val icon = remember { loadLogoPainter() }
+
+        // --- System tray — the command center when the window is closed ----
+        if (icon != null) {
+            Tray(
+                icon = icon,
+                tooltip = "Zero VPN $APP_VERSION",
+                onAction = { Store.windowVisible = true },
+                menu = {
+                    Item("باز کردن Zero VPN", onClick = { Store.windowVisible = true })
+                    when (Store.status) {
+                        ConnStatus.CONNECTED -> Item("قطع اتصال", onClick = { Connector.disconnect() })
+                        ConnStatus.CONNECTING -> Item("در حال اتصال…", onClick = { })
+                        ConnStatus.DISCONNECTED -> Item("اتصال", onClick = { Connector.connect() })
+                    }
+                    Item("تست همه سرورها", onClick = { Connector.testAll() })
+                    Separator()
+                    Item("خروج", onClick = { exitApplication() })
+                }
+            )
+        }
+
         Window(
-            onCloseRequest = ::exitApplication,
+            onCloseRequest = {
+                // X does not quit — the tunnel and tray icon stay alive
+                // (like v2rayN). Real exit lives in the tray menu.
+                Store.windowVisible = false
+            },
+            visible = Store.windowVisible,
             title = "Zero VPN",
             icon = icon,
             resizable = false,
@@ -121,6 +202,15 @@ fun main() {
         ) {
             Surface(modifier = androidx.compose.ui.Modifier.fillMaxSize()) {
                 ZeroApp()
+            }
+        }
+
+        // v2rayNG-style boot behaviour: connect the last server on launch
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+            if (Store.data.settings.autoConnect && Store.profiles.isNotEmpty() &&
+                Store.status == ConnStatus.DISCONNECTED
+            ) {
+                Connector.connect()
             }
         }
     }

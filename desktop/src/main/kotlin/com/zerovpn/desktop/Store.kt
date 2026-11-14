@@ -40,6 +40,8 @@ data class SettingsRec(
     val autoProxy: Boolean = true,
     // "light" | "dark" — light matches the phone app the user compares against
     val theme: String = "light",
+    // v2rayNG-style boot behaviour: connect the selected server at launch
+    val autoConnect: Boolean = false,
 )
 
 @Serializable
@@ -53,7 +55,7 @@ data class DataFile(
 
 enum class ConnStatus { DISCONNECTED, CONNECTING, CONNECTED }
 
-const val APP_VERSION = "1.5.9"
+const val APP_VERSION = "1.6.0"
 
 /**
  * Session stats measured from real ping tests of the current server —
@@ -121,6 +123,9 @@ object Store {
     var selectedGroup by mutableStateOf<String?>(null)
     /** true once the user taps a group tab — keeps the choice across screen switches. */
     var groupChosenExplicit by mutableStateOf(false)
+    /** Main window visibility — closing the window hides it to the tray;
+     *  the app keeps running and is reopened from the tray icon. */
+    var windowVisible by mutableStateOf(true)
 
     val pingMap = mutableStateMapOf<String, Long>()
 
@@ -226,6 +231,11 @@ object Store {
 
     fun setAutoProxy(v: Boolean) {
         data = data.copy(settings = data.settings.copy(autoProxy = v))
+        save()
+    }
+
+    fun setAutoConnect(v: Boolean) {
+        data = data.copy(settings = data.settings.copy(autoConnect = v))
         save()
     }
 

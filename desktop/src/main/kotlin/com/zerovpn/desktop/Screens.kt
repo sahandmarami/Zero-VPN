@@ -789,6 +789,30 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                     )
                 )
             }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("اتصال خودکار هنگام باز شدن", fontSize = 14.sp, color = colorTextPrimary)
+                    Text(
+                        "سرور انتخاب‌شده با اجرای برنامه وصل می‌شود",
+                        fontSize = 11.sp,
+                        color = colorTextSecondary
+                    )
+                }
+                Switch(
+                    checked = Store.data.settings.autoConnect,
+                    onCheckedChange = { Store.setAutoConnect(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedTrackColor = colorZeroNeon,
+                        checkedThumbColor = Color.White,
+                        uncheckedTrackColor = currentTheme.switchOffTrack,
+                        uncheckedThumbColor = colorTextSecondary,
+                        uncheckedBorderColor = Color.Transparent,
+                    )
+                )
+            }
             ZeroSettingsRow(
                 title = "بروزرسانی همه اشتراک‌ها",
                 onClick = { Connector.updateSubs() }
@@ -837,7 +861,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         Spacer(Modifier.height(14.dp))
         ZeroSettingsGroup("درباره") {
             ZeroSettingsRow(title = "نسخه برنامه", value = APP_VERSION, onClick = {})
-            ZeroSettingsRow(title = "هسته", value = "Xray (core/xray.exe)", onClick = {})
+            ZeroSettingsRow(title = "هسته", value = "Xray — فورک PattNG (v26.9.27)", onClick = {})
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

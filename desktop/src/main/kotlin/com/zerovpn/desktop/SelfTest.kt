@@ -46,5 +46,45 @@ fun main(args: Array<String>) {
     val parsed = Profiles.parseBody(b64)
     println("OK    subscription decode: ${parsed.size} links (expect 3)")
 
-    println(if (ok == samples.size && full != null && parsed.size == 3) "SELFTEST PASS" else "SELFTEST FAIL")
+    // --- v1.6.0 parity assertions -------------------------------------------
+    // 1) Unencrypted (PattNG-style) vless on port 443 WITHOUT a security param
+    //    must stay plain — no tlsSettings in the outbound.
+    val plainVless = "vless://b831b3c0-0123-4567-89ab-cdef01234567@example.com:443?type=tcp#Plain"
+    val plainOut = XrayConfig.buildOutbound(plainVless)?.toString() ?: ""
+    val plainOk = plainOut.contains("\"security\"") && !plainOut.contains("tlsSettings")
+    println(if (plainOk) "OK    vless-443 default stays plain (no tlsSettings)" else "FAIL  vless-443 default security")
+    if (plainOk) ok++
+
+    // 2) cs= share-link parameter must map into tlsSettings.cipherSuites
+    val csVless = "vless://b831b3c0-0123-4567-89ab-cdef01234567@example.com:443?security=tls&sni=cdn.example.com&cs=TLS_AES_128_GCM_SHA256&type=tcp#CS"
+    val csOut = XrayConfig.buildOutbound(csVless)?.toString() ?: ""
+    val csOk = csOut.contains("cipherSuites") && csOut.contains("TLS_AES_128_GCM_SHA256")
+    println(if (csOk) "OK    vless cs= maps to tlsSettings.cipherSuites" else "FAIL  vless cs= mapping")
+    if (csOk) ok++
+
+    // 3) trojan with explicit security=none must stay plain (special configs)
+    val plainTrojan = "trojan://password123@example.com:443?security=none&type=tcp#PlainTrojan"
+    val ptOut = XrayConfig.buildOutbound(plainTrojan)?.toString() ?: ""
+    val ptOk = !ptOut.contains("tlsSettings")
+    println(if (ptOk) "OK    trojan security=none stays plain" else "FAIL  trojan security=none")
+    if (ptOk) ok++
+
+    // 4) trojan without a query keeps the classic tls default
+    val defTrojan = "trojan://password123@example.com:443#DefaultTrojan"
+    val dtOut = XrayConfig.buildOutbound(defTrojan)?.toString() ?: ""
+    val dtOk = dtOut.contains("tlsSettings")
+    println(if (dtOk) "OK    trojan no-query defaults to tls" else "FAIL  trojan tls default")
+    if (dtOk) ok++
+
+    // 5) unsafe fingerprint passes through (anti-NIN picker parity)
+    val unsafeVless = "vless://b831b3c0-0123-4567-89ab-cdef01234567@example.com:443?security=tls&fp=unsafe&type=tcp#UnsafeFP"
+    val ufOut = XrayConfig.buildOutbound(unsafeVless)?.toString() ?: ""
+    val ufOk = ufOut.contains("\"fingerprint\":\"unsafe\"")
+    println(if (ufOk) "OK    fp=unsafe passes through" else "FAIL  fp=unsafe passthrough")
+    if (ufOk) ok++
+
+    println(
+        if (ok == samples.size + 5 && full != null && parsed.size == 3) "SELFTEST PASS"
+        else "SELFTEST FAIL ($ok expected ${samples.size + 5})"
+    )
 }
