@@ -7,16 +7,17 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
 /**
- * Zero VPN desktop theme v3 — "Aurora Violet".
+ * Zero VPN desktop theme v4 — "Neon Violet" (the user's mockup).
  *
- * A completely new identity (user asked for a different look, v2.1.0):
- * the old neon-blue "sky" palette is replaced by a violet/indigo aurora —
- * lavender-tinted light surfaces, ink-violet dark surfaces, and a signature
- * three-stop gradient (violet → indigo → cyan) used on the hero, the active
- * nav pill and the connect disc. Shapes stay soft (16–20 dp radii).
+ * v2.3.0: the identity now follows the mockup the user sent — a violet neon
+ * look with a glowing connect ring, soft cards and rounded tiles. Deliberate
+ * softness: the user asked for the mockup style WITHOUT a very dark theme
+ * («لازم هم نیست خیلی تیره باشه تم فعلا»), so dark is a medium violet-navy
+ * (not near-black) and stays the default from a fresh install; light keeps
+ * the lavender-aurora surfaces.
  */
 object ThemeState {
-    /** true = dark theme, false = light theme (default). */
+    /** true = dark theme, false = light theme. */
     var dark by mutableStateOf(false)
 
     fun apply(darkTheme: Boolean) {
@@ -74,29 +75,30 @@ private val light = ZeroThemeColors(
     statusIdle = Color(0xFF9AA0B5),
 )
 
+// Softened violet dark — deliberately NOT near-black (user request).
 private val dark = ZeroThemeColors(
-    bgBase = Color(0xFF0F0E1E),
-    sidebarBg = Color(0xFF141329),
-    textPrimary = Color(0xFFEAE8FA),
-    textSecondary = Color(0xFF9A97BD),
-    cardBg = Color(0xFF1A1836),
-    cardBorder = Color(0xFF2A2752),
-    pillBg = Color(0xFF211E42),
-    accent = Color(0xFF8F7DFF),
-    accentSoft = Color(0xFFB3A7FF),
-    accentDeep = Color(0xFF6A54E8),
-    pingGood = Color(0xFF37D9B8),
-    pingMid = Color(0xFFFFB454),
+    bgBase = Color(0xFF1E1838),
+    sidebarBg = Color(0xFF26204A),
+    textPrimary = Color(0xFFF1EEFF),
+    textSecondary = Color(0xFFA79FD4),
+    cardBg = Color(0xFF2A2354),
+    cardBorder = Color(0xFF3B3268),
+    pillBg = Color(0xFF342B60),
+    accent = Color(0xFF9D7BFF),
+    accentSoft = Color(0xFFBDA4FF),
+    accentDeep = Color(0xFF7A55F2),
+    pingGood = Color(0xFF3ED9AC),
+    pingMid = Color(0xFFFFB35C),
     pingBad = Color(0xFFFF6B81),
-    bannerBg = Color(0xFF211E42),
+    bannerBg = Color(0xFF342B60),
     scrim = Color.Black.copy(alpha = 0.55f),
-    fieldText = Color(0xFFEAE8FA),
-    switchOffTrack = Color(0xFF2E2A55),
-    hoverBg = Color(0xFF201D40),
-    selectedRowBg = Color(0xFF262052),
-    divider = Color(0xFF25224A),
-    statusOk = Color(0xFF2BD9A5),
-    statusIdle = Color(0xFF6A6790),
+    fieldText = Color(0xFFF1EEFF),
+    switchOffTrack = Color(0xFF43396F),
+    hoverBg = Color(0xFF322A5E),
+    selectedRowBg = Color(0xFF3A2F6E),
+    divider = Color(0xFF352C60),
+    statusOk = Color(0xFF38E0A8),
+    statusIdle = Color(0xFF8F89BC),
 )
 
 val currentTheme: ZeroThemeColors
@@ -111,16 +113,27 @@ val colorBgTop: Color get() = currentTheme.bgBase
 val colorBgBottom: Color get() = currentTheme.bgBase
 val colorTextPrimary: Color get() = currentTheme.textPrimary
 
-/** Signature aurora gradient: violet → indigo → cyan. */
+/** Signature gradient — violet monochrome like the mockup ring. */
 val heroGradient: Brush
     get() = Brush.linearGradient(
         listOf(
             currentTheme.accentSoft,
             currentTheme.accent,
-            Color(0xFF35C2E8),
+            currentTheme.accentDeep,
         )
     )
 
 /** Gradient used on the connect disc + status accents. */
 val accentGradient: Brush
     get() = Brush.linearGradient(listOf(currentTheme.accent, currentTheme.accentDeep))
+
+/** The mockup's ring: a sweep around the accent wheel (used by Canvas draws). */
+val ringSweep: Brush
+    get() = Brush.sweepGradient(
+        listOf(
+            currentTheme.accentDeep,
+            currentTheme.accent,
+            currentTheme.accentSoft,
+            currentTheme.accentDeep,
+        )
+    )

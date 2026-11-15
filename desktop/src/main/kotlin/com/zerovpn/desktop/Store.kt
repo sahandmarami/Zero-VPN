@@ -41,8 +41,9 @@ data class SubRec(
 data class SettingsRec(
     val socksPort: Int = 10808,
     val autoProxy: Boolean = true,
-    // "light" | "dark"
-    val theme: String = "light",
+    // "light" | "dark" — v2.3.0: dark violet (the mockup look) is the default
+    // on a fresh install; existing users keep their saved choice.
+    val theme: String = "dark",
     // v2rayNG-style boot behaviour: connect the selected server at launch
     val autoConnect: Boolean = false,
     // v2rayNG-style behaviour: selecting another server while connected
@@ -66,7 +67,7 @@ data class DataFile(
 
 enum class ConnStatus { DISCONNECTED, CONNECTING, CONNECTED }
 
-const val APP_VERSION = "2.2.0"
+const val APP_VERSION = "2.3.0"
 
 /** Release page opened by the update banner. */
 const val RELEASES_URL = "https://github.com/sahandmarami/Zero-VPN/releases/latest"
@@ -249,7 +250,7 @@ object Store {
         ThemeState.apply(data.settings.theme == "dark")
         GeoLookup.loadCache()
         profiles.forEach { p ->
-            ServerInfo.hostPort(p.link)?.first?.let { GeoLookup.ensureLookup(it) }
+            ServerInfo.hostPort(p.link)?.first?.let { GeoLookup.ensureLookup(it, p.name) }
         }
     }
 

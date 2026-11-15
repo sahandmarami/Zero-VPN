@@ -84,10 +84,10 @@ fun ServersScreen(modifier: Modifier = Modifier) {
         } else list
     }
 
-    // Geo (flag + IP) prefetch for every host in the visible group.
+    // Geo (flag + country + IP) prefetch for every host in the visible group.
     androidx.compose.runtime.LaunchedEffect(profiles.map { it.id }) {
         profiles.forEach { p ->
-            ServerInfo.hostPort(p.link)?.first?.let { GeoLookup.ensureLookup(it) }
+            ServerInfo.hostPort(p.link)?.first?.let { GeoLookup.ensureLookup(it, p.name) }
         }
     }
 
@@ -162,7 +162,7 @@ fun ServersScreen(modifier: Modifier = Modifier) {
                     onDismissRequest = { showMoreMenu = false },
                     containerColor = t.cardBg,
                 ) {
-                    MenuRow("تست همه سرورها") { showMoreMenu = false; Connector.testAll() }
+                    MenuRow("پینگ واقعی همه سرورها") { showMoreMenu = false; Connector.testAll() }
                     MenuRow("حذف همه سرورها") { showMoreMenu = false; showDelAllConfirm = true }
                 }
             }
@@ -537,8 +537,28 @@ private fun ServerRow(
                     )
                 }
                 Spacer(Modifier.width(8.dp))
+                // v2.3.0 — the REAL country next to every config (V2Box look):
+                // resolved from the DoH-resolved server IP, remark hint only
+                // as fallback. Persian name, then the ISO code.
                 val hostPort = remember(profile.id) { ServerInfo.hostPort(profile.link) }
                 val geo = hostPort?.first?.let { GeoLookup.byHost[it] }
+                val countryText = localizedCountryName(geo?.cc)
+                if (countryText != null) {
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(t.accent.copy(alpha = 0.10f))
+                            .padding(horizontal = 6.dp, vertical = 1.dp)
+                    ) {
+                        Text(
+                            countryText,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = t.accent
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                }
                 Text(
                     listOfNotNull(
                         hostPort?.first,

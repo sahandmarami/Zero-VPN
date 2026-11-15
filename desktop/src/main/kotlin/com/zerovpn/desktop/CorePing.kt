@@ -7,7 +7,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -44,10 +43,14 @@ import java.util.concurrent.atomic.AtomicInteger
  *     each server is tested by HTTP GET of the delay-test URL THROUGH its
  *     own socks inbound (gstatic generate_204 → cloudflare fallback — the
  *     same URLs the connect-flow real ping uses);
- *   - TCP prefilter (1.2 s, Android-parity socketConnectTime) kills hopeless
- *     servers before they occupy a core test — EXCEPT hysteria2, whose
- *     servers are UDP/QUIC and must skip the prefilter (Android parity too);
- *   - at most 2 chunk cores run concurrently, 8 tests in parallel per chunk;
+ *   - v2.3.0: the old TCP PREFILTER IS GONE. It dialled host:port with the
+ *     raw system resolver + first address only (none of the v1.5.7
+ *     hardening) and marked servers "timeout" that ACTUALLY WORK — the
+ *     connect flow never prefilters, which is exactly why the user saw
+ *     "configs connect but pings lie". A dead server now just costs its own
+ *     2×6 s deadline inside the chunk core instead of a false -1;
+ *   - at most 2 chunk cores run concurrently, 4 tests in parallel per chunk
+ *     (8 satiated weak uplinks and inflated the numbers).
  *   - every config/log/temp port lives only for the chunk's lifetime.
  *
  * Result semantics match the app-wide contract: ms > 0 = real delay through
@@ -56,7 +59,7 @@ import java.util.concurrent.atomic.AtomicInteger
 object CorePing {
 
     private const val CHUNK = 12
-    private const val PARALLEL = 8
+    private const val PARALLEL = 4
     private const val CHUNK_CONCURRENCY = 2
     private const val PORT_SCAN_MIN = 30000
 
@@ -218,14 +221,14 @@ object CorePing {
         }
     }
 
-    /** One server: TCP prefilter (non-QUIC only) + real delay via its inbound. */
+    /**
+     * One server: the REAL delay via its own chunk inbound. v2.3.0 — no TCP
+     * prefilter: it dialled the host straight from the app with the raw
+     * system resolver and marked working servers timeout (poisoned DNS /
+     * dead-AAAA paths that the core's own dialling survives). The only
+     * honest number is the through-the-core one.
+     */
     private suspend fun testOne(t: Target, port: Int): Long {
-        // Android parity: hysteria2 servers speak QUIC — a TCP prefilter would
-        // mark every working UDP server dead, so it must be skipped.
-        if (!t.isQuic && t.host.isNotBlank() && t.port > 0) {
-            val tcp = withTimeoutOrNull(1500L) { PingTest.tcp(t.host, t.port, 1200) }
-            if (tcp == null || tcp <= 0L) return -1L
-        }
         var ms = realPing(port, "https://www.gstatic.com/generate_204", 6000)
         if (ms < 0) ms = realPing(port, "https://cp.cloudflare.com/generate_204", 6000)
         return ms

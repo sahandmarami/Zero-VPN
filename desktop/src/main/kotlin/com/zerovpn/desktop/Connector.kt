@@ -243,12 +243,12 @@ object Connector {
         Store.testing = true
         Store.ui.launch {
             val total = Store.profiles.size
-            Store.busyMsg = "در حال تست واقعی سرورها (از طریق هسته)… 0/$total"
+            Store.busyMsg = "در حال پینگ واقعی سرورها (از طریق هسته)… 0/$total"
             try {
                 CorePing.testAll(
                     Store.profiles.toList(),
                     record = { id, ms -> Store.recordPing(id, ms) },
-                    progress = { done, t -> Store.busyMsg = "در حال تست واقعی سرورها (از طریق هسته)… $done/$t" },
+                    progress = { done, t -> Store.busyMsg = "در حال پینگ واقعی سرورها (از طریق هسته)… $done/$t" },
                 )
             } catch (t: Throwable) {
                 Store.toast("خطا در تست سرورها: ${t.message?.take(80) ?: t.javaClass.simpleName}")
@@ -256,7 +256,7 @@ object Connector {
             Store.busyMsg = null
             Store.testing = false
             Store.save()
-            Store.toast("تست همه سرورها تمام شد")
+            Store.toast("پینگ واقعی تمام شد")
         }
     }
 

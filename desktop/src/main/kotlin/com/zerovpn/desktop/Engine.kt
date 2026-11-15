@@ -882,8 +882,10 @@ object PingTest {
      * 8.8.8.8 are among the MOST filtered IPs there. Added Quad9 (9.9.9.9,
      * JSON on :5053), AdGuard (94.140.14.14) and per-endpoint 2.5 s caps so
      * a fully-dead DoH path cannot stall the ping batch.
+     * v2.3.0: optional socksPort — while the tunnel is up the geo/DoH
+     * queries ride it, because 1.1.1.1/8.8.8.8 are filtered on those ISPs.
      */
-    fun dohResolve(host: String): List<java.net.InetAddress> {
+    fun dohResolve(host: String, socksPort: Int? = null): List<java.net.InetAddress> {
         val q = java.net.URLEncoder.encode(host, "UTF-8")
         val endpoints = listOf(
             "https://1.1.1.1/dns-query?name=$q&type=A",
@@ -896,7 +898,7 @@ object PingTest {
         )
         for (url in endpoints) {
             try {
-                val body = viaSocksDohGet(url) ?: continue
+                val body = viaSocksDohGet(url, socksPort) ?: continue
                 val answers = Regex("\"data\"\\s*:\\s*\"(\\d{1,3}(?:\\.\\d{1,3}){3})\"")
                     .findAll(body).map { it.groupValues[1] }.toList()
                 val ips = answers.mapNotNull {
@@ -908,11 +910,15 @@ object PingTest {
         return emptyList()
     }
 
-    private fun viaSocksDohGet(url: String): String? = try {
+    private fun viaSocksDohGet(url: String, socksPort: Int? = null): String? = try {
         // v2.2.0: NO_PROXY — this used to inherit the Windows system proxy
         // (WinINET registry), so with ANY stale/broken system proxy set the
         // DoH fallback died too and the batch ping degraded to garbage.
-        val conn = URL(url).openConnection(java.net.Proxy.NO_PROXY) as HttpURLConnection
+        // v2.3.0: explicit SOCKS dial while the tunnel is up.
+        val proxy = if (socksPort != null)
+            java.net.Proxy(java.net.Proxy.Type.SOCKS, java.net.InetSocketAddress("127.0.0.1", socksPort))
+        else java.net.Proxy.NO_PROXY
+        val conn = URL(url).openConnection(proxy) as HttpURLConnection
         conn.connectTimeout = 2500
         conn.readTimeout = 2500
         conn.setRequestProperty("Accept", "application/dns-json")

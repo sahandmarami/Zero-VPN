@@ -293,7 +293,36 @@ fun main(args: Array<String>) {
     println(if (chunkCfg) "OK    chunk outbound base (tag proxy present)" else "FAIL  chunk outbound base")
     if (chunkCfg) ok++
 
-    val expected = samples.size + 21
+    // --- v2.3.0 assertions -----------------------------------------------------
+    // 20) CountryHint — remark → country (the V2Box-style flag fallback):
+    //     flag emoji, Persian/English country words, city aliases, ISO token.
+    val hintOk = CountryHint.fromName("🇩🇪 Germany 12") == "DE" &&
+        CountryHint.fromName("آلمان #3") == "DE" &&
+        CountryHint.fromName("DE-01 fast") == "DE" &&
+        CountryHint.fromName("Dubai 2") == "AE" &&
+        CountryHint.fromName("Netherlands Premium") == "NL" &&
+        CountryHint.fromName("سرور تستی بدون کشور") == null
+    println(if (hintOk) "OK    country hint parsing (emoji/fa/en/iso)" else "FAIL  country hint parsing")
+    if (hintOk) ok++
+
+    // 21) parseGeoBody tolerates every geo source's field naming; junk → null.
+    val geo1 = GeoLookup.parseGeoBody("{\"ip\":\"1.2.3.4\",\"success\":true,\"country\":\"Germany\",\"country_code\":\"DE\"}")
+    val geo2 = GeoLookup.parseGeoBody("{\"countryCode\":\"DE\",\"country\":\"Germany\",\"ip\":\"1.2.3.4\"}")
+    val geo3 = GeoLookup.parseGeoBody("{\"countryCode\":\"DE\",\"countryName\":\"Germany\",\"ipAddress\":\"1.2.3.4\"}")
+    val geo4 = GeoLookup.parseGeoBody("{\"success\":false}")
+    val geo5 = GeoLookup.parseGeoBody("not json at all")
+    val geoOk = geo1?.cc == "DE" && geo2?.cc == "DE" && geo3?.cc == "DE" &&
+        geo4 == null && geo5 == null && geo1?.ip == "1.2.3.4"
+    println(if (geoOk) "OK    geo response parser (ipwho/ip.sb/freeipapi + failures)" else "FAIL  geo response parser: $geo1 $geo2 $geo3 $geo4")
+    if (geoOk) ok++
+
+    // 22) Persian country names (the flag chips next to every config)
+    val faName = localizedCountryName("DE") == "آلمان" && localizedCountryName("US") == "آمریکا" &&
+        localizedCountryName(null) == null
+    println(if (faName) "OK    persian country display names" else "FAIL    persian country names")
+    if (faName) ok++
+
+    val expected = samples.size + 24
     println(
         if (ok == expected && full != null) "SELFTEST PASS ($ok/$expected)"
         else "SELFTEST FAIL ($ok expected $expected)"
