@@ -274,7 +274,7 @@ fun main() {
                         ConnStatus.CONNECTING -> Item("در حال اتصال…", onClick = { })
                         ConnStatus.DISCONNECTED -> Item("اتصال", onClick = { Connector.connect() })
                     }
-                    Item("پینگ واقعی همه سرورها", onClick = { Connector.testAll() })
+                    Item("تست پینگ همه سرورها", onClick = { Connector.testAll() })
                     Separator()
                     Item("خروج", onClick = { exitApplication() })
                 }

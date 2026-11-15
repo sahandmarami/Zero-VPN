@@ -222,6 +222,19 @@ fun main(args: Array<String>) {
     println(if (insOk) "OK    insecure link never emits allowInsecure:true" else "FAIL  insecure link migration")
     if (insOk) ok++
 
+    // v2.4.0: persist the exact JSON the official Xray-core must accept, for
+    // the live probe (xray run -test / end-to-end loopback traffic run).
+    try {
+        java.io.File("selftest-hy2-outbound.json").writeText(
+            XrayConfig.json.encodeToString(JsonObject.serializer(), hy2Out!!)
+        )
+        XrayConfig.buildFullConfig(plainVless, 10808, 10809, 10810)?.let {
+            java.io.File("selftest-plain-config.json").writeText(
+                XrayConfig.json.encodeToString(JsonObject.serializer(), it)
+            )
+        }
+    } catch (_: Throwable) { }
+
     // 17) ServerInfo.hostPort covers hysteria2 (geo chip + prefilter input)
     val hy2Hp = ServerInfo.hostPort(hy2Link)
     val hy2HpOk = hy2Hp == ("hy2.example.com" to 443)
@@ -322,7 +335,35 @@ fun main(args: Array<String>) {
     println(if (faName) "OK    persian country display names" else "FAIL    persian country names")
     if (faName) ok++
 
-    val expected = samples.size + 24
+    // --- v2.4.0 assertions -----------------------------------------------------
+    // 23) PortGuard netstat parser — the orphan-xray sweep's pure core:
+    //     finds the LISTENING pid on the port, ignores foreign ports and
+    //     non-listening lines (TIME_WAIT / ESTABLISHED must never be killed).
+    val netstatSample = listOf(
+        "  TCP    127.0.0.1:10808     0.0.0.0:0    LISTENING    4321",
+        "  TCP    127.0.0.1:10809     0.0.0.0:0    LISTENING    4321",
+        "  TCP    127.0.0.1:10808     1.2.3.4:55   TIME_WAIT    0",
+        "  TCP    192.168.1.5:139    0.0.0.0:0    LISTENING    999",
+        "  TCP    127.0.0.1:110808   0.0.0.0:0    LISTENING    555",
+    )
+    val guardOk = PortGuard.parseListenerPid(netstatSample, 10808) == 4321L &&
+        PortGuard.parseListenerPid(netstatSample, 10809) == 4321L &&
+        PortGuard.parseListenerPid(netstatSample, 12345) == null &&
+        PortGuard.parseListenerPid(netstatSample, 139) == 999L
+    println(if (guardOk) "OK    portguard netstat parse (orphan sweep core)" else "FAIL  portguard parse")
+    if (guardOk) ok++
+
+    // 24) The tunnel port triple + the batch classification: hy2 rows are the
+    //     ONLY profiles measured through the core (no TCP listener exists for
+    //     QUIC-only servers); everything else is a plain TCP dial.
+    val portsOk = PortGuard.tunnelPorts() == listOf(10808, 10809, 10810)
+    val hy2Rec = ProfileRec("x", "n", "hysteria2", "hysteria2://p@h:443#x")
+    val tcpRec = ProfileRec("y", "n", "vless", "vless://u@h:443#y")
+    val classOk = Connector.usesCorePing(hy2Rec) && !Connector.usesCorePing(tcpRec)
+    println(if (portsOk && classOk) "OK    tunnel ports + hy2/core-ping classification" else "FAIL  ports/classification")
+    if (portsOk && classOk) ok++
+
+    val expected = samples.size + 26
     println(
         if (ok == expected && full != null) "SELFTEST PASS ($ok/$expected)"
         else "SELFTEST FAIL ($ok expected $expected)"

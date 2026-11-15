@@ -1,6 +1,7 @@
 package com.zerovpn.desktop
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
@@ -712,6 +713,103 @@ object Engine {
 }
 
 // ---------------------------------------------------------------------------
+// PortGuard (v2.4.0) — the "وصل میشه ولی کار نمیکنه" fix.
+//
+// The tunnel inbounds live on FIXED loopback ports (socks / http / api =
+// socksPort .. socksPort+2). When a previous session is force-killed (Task
+// Manager on a frozen window), its xray.exe SURVIVES and keeps listening on
+// exactly those ports. The next launch then starts a fresh core whose socks
+// inbound CANNOT bind; the port wait sees the ORPHAN answering, the UI says
+// "متصل", the browser traffic flows into the orphan's tunnel — whose server
+// is long dead — and nothing loads while everything looks connected.
+// Nothing in v2.3.0 ever cleaned that up.
+//
+// PortGuard owns the three ports before the core starts:
+//  - parseListenerPid: pure netstat-line parser (self-tested);
+//  - listenerPid(port): the PID of whatever LISTENs on it (netstat -ano);
+//  - imageOf(pid): process image name via tasklist (Windows only);
+//  - freeOurPorts(): kill every ORPHAN xray.exe listening on our tunnel
+//    ports; a FOREIGN image is left untouched and reported, so the user
+//    gets a clear message instead of a silently dead tunnel.
+// ---------------------------------------------------------------------------
+object PortGuard {
+
+    /** The tunnel's three fixed ports: socks, http (socks+1), api (socks+2). */
+    fun tunnelPorts(): List<Int> = listOf(Store.socksPort, Store.httpPort, Store.apiPort)
+
+    /**
+     * Pure parser: the PID of the LISTENING socket on `port` inside netstat
+     * -ano output, or null. Matching a line like
+     * "  TCP    127.0.0.1:10808     0.0.0.0:0    LISTENING    4321".
+     */
+    internal fun parseListenerPid(lines: List<String>, port: Int): Long? {
+        val p = Regex("[:.]${port}\\s")
+        for (line in lines) {
+            if (!line.contains("LISTENING", true)) continue
+            if (!p.containsMatchIn(line)) continue
+            val pid = line.trim().split(Regex("\\s+")).lastOrNull()?.toLongOrNull()
+            if (pid != null && pid > 0) return pid
+        }
+        return null
+    }
+
+    /** PID listening on `port` right now (Windows netstat; null elsewhere). */
+    fun listenerPid(port: Int): Long? {
+        if (!Store.isWindows) return null
+        return try {
+            val proc = ProcessBuilder("netstat", "-ano", "-p", "TCP").start()
+            val out = proc.inputStream.use { it.readBytes().decodeToString() }
+            proc.waitFor(4000, java.util.concurrent.TimeUnit.MILLISECONDS)
+            parseListenerPid(out.lines(), port)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /** Image name (lowercase, no path) of `pid` — Windows only, null otherwise. */
+    fun imageOf(pid: Long): String? {
+        if (!Store.isWindows) return null
+        return try {
+            val proc = ProcessBuilder("tasklist", "/FI", "PID eq $pid", "/FO", "CSV", "/NH").start()
+            val out = proc.inputStream.use { it.readBytes().decodeToString() }
+            proc.waitFor(4000, java.util.concurrent.TimeUnit.MILLISECONDS)
+            out.lineSequence().firstOrNull { it.isNotBlank() }
+                ?.substringBefore(',')?.trim('"')?.lowercase()?.takeIf { it.isNotBlank() }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /** Force-kill one PID (Windows). Returns true when taskkill accepted it. */
+    fun killPid(pid: Long): Boolean = try {
+        if (!Store.isWindows) false
+        else ProcessBuilder("taskkill", "/F", "/PID", pid.toString()).start().waitFor() == 0
+    } catch (_: Throwable) {
+        false
+    }
+
+    /**
+     * Sweep our tunnel ports: every orphan xray.exe listening there is
+     * killed (it can only be a leftover of a force-killed previous session —
+     * a running session holds the instance lock and never reaches here).
+     * Returns the first port held by a FOREIGN process (no auto-kill — the
+     * user gets a precise message instead), or null when all ports are free.
+     */
+    fun freeOurPorts(): Int? {
+        for (port in tunnelPorts()) {
+            val pid = listenerPid(port) ?: continue
+            val image = imageOf(pid)
+            if (image == "xray.exe") {
+                killPid(pid)
+            } else {
+                return port
+            }
+        }
+        return null
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tor probe (v2.1.0) — is a local Tor SOCKS port actually alive?
 // A plain TCP connect is NOT enough (any listener answers); a real SOCKS5
 // handshake is sent and the reply must be 0x05 0x00 (no-auth accepted).
@@ -827,27 +925,39 @@ object PingTest {
     }
 
     /**
-     * Deadline-bounded TCP ping used by the batch test. Hardened against the
-     * "some servers time out on Windows but ping fine on Android" report:
+     * Deadline-bounded TCP ping used by the batch test — the V2Box/v2rayNG
+     * "ping" number (TCP handshake RTT against the server's REAL address).
      *
-     * 1. ALL resolved addresses are tried, IPv4 first — the plain path used
+     * Hardening:
+     * 1. v2.4.0 — resolution runs BOTH paths CONCURRENTLY with the DoH answer
+     *    dialled FIRST. The Iranian system resolver poisons filtered server
+     *    domains into fake IPs that still accept TCP handshakes, so trusting
+     *    the system answer first produced great-looking pings for servers
+     *    that can never carry traffic (the v2.2.0 finding). DoH uses the
+     *    IP-hosted endpoints (no working DNS needed) under its own 4 s cap;
+     *    the system resolver runs in parallel as the second path.
+     * 2. ALL resolved addresses are tried, IPv4 first — the plain path used
      *    getByName, which on v6-capable Windows boxes happily returns an AAAA
      *    address whose routing is broken; the socket then hangs on a dead v6
      *    route and the whole ping reports timeout even though the v4 address
      *    is perfectly reachable (Android's resolver typically answers with
      *    the v4 address, which is exactly why the phone worked).
-     * 2. When the system resolver returns nothing at all (poisoned/dead ISP
-     *    DNS — common for filtered server domains), a DNS-over-HTTPS JSON
-     *    lookup (Google → Cloudflare) provides a second resolution path.
-     * 3. Every step runs behind a hard withTimeoutOrNull deadline; a stuck
-     *    connect or lookup is abandoned (-1) and can never stall the batch.
-     * Never blocks longer than timeoutMs + 2.5 s per server.
+     * 3. Every step runs behind a hard deadline; a stuck connect or lookup
+     *    is abandoned (-1) and can never stall the batch.
+     * Never blocks longer than timeoutMs + ~7 s per server (worst case:
+     * both resolvers dead, first dial hanging).
      */
     suspend fun tcpBounded(host: String, port: Int, timeoutMs: Int = 5000): Long =
-        withTimeoutOrNull(timeoutMs + 2500L) {
-            var addrs = withContext(Dispatchers.IO) { resolveAll(host) }
-            if (addrs.isEmpty()) {
-                addrs = withContext(Dispatchers.IO) { dohResolve(host) }
+        withTimeoutOrNull(timeoutMs + 7000L) {
+            val addrs = kotlinx.coroutines.coroutineScope {
+                val doh = async(Dispatchers.IO) {
+                    withTimeoutOrNull(4000L) { dohResolve(host) } ?: emptyList<java.net.InetAddress>()
+                }
+                val sys = async(Dispatchers.IO) {
+                    withTimeoutOrNull(3500L) { resolveAll(host) } ?: emptyList<java.net.InetAddress>()
+                }
+                val seen = HashSet<String>()
+                (doh.await() + sys.await()).filter { seen.add(it.hostAddress ?: "") }
             }
             if (addrs.isEmpty()) return@withTimeoutOrNull -1L
             // IPv4 first — dead v6 routes are the #1 false-timeout cause.

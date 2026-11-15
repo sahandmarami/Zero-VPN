@@ -90,6 +90,18 @@ object Connector {
                 Store.toast("نوشتن کانفیگ ممکن نشد: ${t.message}")
                 return@launch
             }
+            // v2.4.0 — PREFLIGHT: an orphan xray.exe of a force-killed
+            // previous session owns our fixed ports → the fresh core cannot
+            // bind, the UI says "connected" and the browser talks into the
+            // dead orphan tunnel (the "وصل میشه ولی کار نمیکنه" report).
+            // Sweep the leftovers first; a FOREIGN occupier is reported
+            // instead of silently losing the bind race.
+            val foreignPort = withContext(Dispatchers.IO) { PortGuard.freeOurPorts() }
+            if (foreignPort != null) {
+                Store.status = ConnStatus.DISCONNECTED
+                Store.toast("پورت $foreignPort توسط برنامهٔ دیگری اشغال است — پورت را در تنظیمات عوض کنید")
+                return@launch
+            }
             val proc = withContext(Dispatchers.IO) { Engine.start(Store.configFile) }
             if (proc == null) {
                 Store.status = ConnStatus.DISCONNECTED
@@ -105,6 +117,37 @@ object Connector {
                     else "اتصال برقرار نشد — سرور در دسترس نیست یا پورت اشغال است"
                 )
                 return@launch
+            }
+            // v2.4.0 — OWNERSHIP CHECK. The port wait only proves SOMETHING
+            // listens on the socks port; if an orphan xray.exe of a
+            // force-killed session won the bind race, the "connected" state
+            // would be the dead orphan's tunnel and no traffic would flow
+            // (the exact "وصل میشه ولی کار نمیکنه" report). The listener PID
+            // must be OUR core process — otherwise kill the impostor (when
+            // it is another xray.exe) and restart once.
+            val listenPid = withContext(Dispatchers.IO) { PortGuard.listenerPid(socks) }
+            if (listenPid != null && listenPid != proc.pid()) {
+                withContext(Dispatchers.IO) {
+                    if (PortGuard.imageOf(listenPid) == "xray.exe") {
+                        PortGuard.killPid(listenPid)
+                        Engine.stop()
+                        PortGuard.freeOurPorts()
+                    }
+                }
+                val retry = withContext(Dispatchers.IO) { Engine.start(Store.configFile) }
+                if (retry == null || !Engine.waitForPort(socks, 12000)) {
+                    withContext(Dispatchers.IO) { Engine.stop() }
+                    Store.status = ConnStatus.DISCONNECTED
+                    Store.toast("اتصال برقرار نشد — پورت $socks در اختیار برنامهٔ دیگری است؛ پورت را در تنظیمات عوض کنید")
+                    return@launch
+                }
+                val recheck = withContext(Dispatchers.IO) { PortGuard.listenerPid(socks) }
+                if (recheck != null && recheck != retry.pid()) {
+                    withContext(Dispatchers.IO) { Engine.stop() }
+                    Store.status = ConnStatus.DISCONNECTED
+                    Store.toast("اتصال برقرار نشد — پورت $socks در اختیار برنامهٔ دیگری است؛ پورت را در تنظیمات عوض کنید")
+                    return@launch
+                }
             }
             if (Store.autoProxy && Store.isWindows) {
                 val ok = withContext(Dispatchers.IO) { SysProxy.enable(http) }
@@ -125,6 +168,17 @@ object Connector {
             }
             Store.recordPing(p.id, ms)
             ZeroStatsTracker.record(ms)
+            // v2.4.0 — HONEST HEALTH CHECK. "Connected" so far only meant the
+            // inbound port answers; it says nothing about the server actually
+            // carrying traffic — precisely the silent "وصل میشه ولی کار
+            // نمیکنه" state. When the fresh tunnel cannot fetch its own
+            // generate_204, SAY SO instead of pretending everything is fine.
+            if (ms < 0) {
+                Store.toast(
+                    "اتصال برقرار شد اما ترافیک از سرور عبور نمی‌کند — " +
+                        "این سرور را عوض کنید یا «تست پینگ» را بگیرید"
+                )
+            }
         }
     }
 
@@ -232,31 +286,69 @@ object Connector {
         }
     }
 
+    /** hysteria2 profiles have no TCP listener (UDP/QUIC-only) — only they
+     *  are measured through the core; everything else is a plain TCP dial. */
+    fun usesCorePing(p: ProfileRec): Boolean = p.proto == "hysteria2"
+
     /**
-     * v2.2.0 — REAL delay test of every server through the core (CorePing),
-     * replacing the raw TCP handshake that reported great-looking pings for
-     * poisoned/unreachable servers. Android parity: the phone always measured
-     * through the core (CoreTestService → measureOutboundDelay).
+     * v2.4.0 — V2Box/v2rayNG-STYLE LIST PING. The user rejected the
+     * through-the-core numbers («پینگ رو اشتباه میده و عدد خیلی بالایی
+     * میده»): a generate_204 fetch includes TLS-to-target + HTTP round trip,
+     * which is a page-load time, not a ping — other apps show the TCP
+     * handshake RTT and that is what this list now shows too:
+     *
+     *  - every TCP-based profile: PingTest.tcpBounded — the server's REAL
+     *    address (DoH answered FIRST, poisoned system resolver second), all
+     *    IPs IPv4-first, 5 s deadline per dial, 6 servers in parallel;
+     *  - hysteria2 profiles: NO TCP listener (UDP/QUIC-only) — they keep the
+     *    through-the-core delay via CorePing (chunked official core), so a
+     *    hy2 row never shows a fake تایم‌اوت;
+     *  - a failed dial records -1 (تایم‌اوت) — a stale number from an older
+     *    test never survives a dead server.
      */
     fun testAll() {
         if (Store.testing || Store.profiles.isEmpty()) return
         Store.testing = true
         Store.ui.launch {
             val total = Store.profiles.size
-            Store.busyMsg = "در حال پینگ واقعی سرورها (از طریق هسته)… 0/$total"
+            val done = java.util.concurrent.atomic.AtomicInteger(0)
+            fun bump() {
+                val d = done.incrementAndGet()
+                postStateWrite { Store.busyMsg = "در حال تست پینگ سرورها… $d/$total" }
+            }
+            postStateWrite { Store.busyMsg = "در حال تست پینگ سرورها… 0/$total" }
             try {
-                CorePing.testAll(
-                    Store.profiles.toList(),
-                    record = { id, ms -> Store.recordPing(id, ms) },
-                    progress = { done, t -> Store.busyMsg = "در حال پینگ واقعی سرورها (از طریق هسته)… $done/$t" },
-                )
+                val tcp = Store.profiles.filter { !usesCorePing(it) }
+                val hy2 = Store.profiles.filter { usesCorePing(it) }
+                kotlinx.coroutines.coroutineScope {
+                    val sem = Semaphore(6)
+                    val tcpJobs = tcp.mapNotNull { p ->
+                        ServerInfo.hostPort(p.link)?.let { (host, port) ->
+                            launch(Dispatchers.IO) {
+                                sem.withPermit {
+                                    Store.recordPing(p.id, PingTest.tcpBounded(host, port))
+                                    bump()
+                                }
+                            }
+                        }
+                    }
+                    val hy2Job = if (hy2.isEmpty()) null else launch(Dispatchers.IO) {
+                        CorePing.testAll(
+                            hy2,
+                            record = { id, ms -> Store.recordPing(id, ms) },
+                            progress = { _, _ -> bump() },
+                        )
+                    }
+                    tcpJobs.joinAll()
+                    hy2Job?.join()
+                }
             } catch (t: Throwable) {
                 Store.toast("خطا در تست سرورها: ${t.message?.take(80) ?: t.javaClass.simpleName}")
             }
-            Store.busyMsg = null
+            postStateWrite { Store.busyMsg = null }
             Store.testing = false
             Store.save()
-            Store.toast("پینگ واقعی تمام شد")
+            Store.toast("تست پینگ تمام شد")
         }
     }
 

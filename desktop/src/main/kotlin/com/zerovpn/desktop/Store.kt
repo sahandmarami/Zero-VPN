@@ -41,9 +41,11 @@ data class SubRec(
 data class SettingsRec(
     val socksPort: Int = 10808,
     val autoProxy: Boolean = true,
-    // "light" | "dark" — v2.3.0: dark violet (the mockup look) is the default
-    // on a fresh install; existing users keep their saved choice.
-    val theme: String = "dark",
+    // "light" | "dark" — v2.4.0: the v2.3.0 violet mockup theme is GONE (the
+    // user: تم خیلی داغون شد مثل قبل کنش); the UI files are back to the
+    // v2.2.0 look, so the fresh-install default is the old one again. Users
+    // who picked a theme themselves keep their saved choice.
+    val theme: String = "light",
     // v2rayNG-style boot behaviour: connect the selected server at launch
     val autoConnect: Boolean = false,
     // v2rayNG-style behaviour: selecting another server while connected
@@ -67,7 +69,7 @@ data class DataFile(
 
 enum class ConnStatus { DISCONNECTED, CONNECTING, CONNECTED }
 
-const val APP_VERSION = "2.3.0"
+const val APP_VERSION = "2.4.0"
 
 /** Release page opened by the update banner. */
 const val RELEASES_URL = "https://github.com/sahandmarami/Zero-VPN/releases/latest"

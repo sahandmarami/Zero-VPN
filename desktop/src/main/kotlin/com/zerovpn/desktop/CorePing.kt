@@ -22,16 +22,17 @@ import java.net.URL
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * CorePing (v2.2.0) — REAL per-server delay test through the Xray core.
+ * CorePing (v2.2.0; v2.4.0 scope: hysteria2 profiles only) — real per-server
+ * delay test through the Xray core.
  *
- * Why this exists: the old "test all" was a raw TCP handshake to the server's
- * host:port. On real Iranian networks that lies — a poisoned/blackholed
- * domain resolves to some unrelated host that ACCEPTS the TCP handshake fast
- * (great-looking ping!) while the actual tunnel can never work. The phone app
- * never had this problem because its "test all" measures REAL delay through
- * the core (CoreTestService → RealPingWorkerService → measureOutboundDelay).
- * This is the desktop port of that behaviour — the user asked for exactly
- * this: "برو همون نسخه اندروید رو تبدیل به ویندوز کن".
+ * v2.4.0: the list ping is now the V2Box-style TCP handshake RTT
+ * (Connector.testAll → PingTest.tcpBounded) because the user rejected the
+ * through-the-core numbers as "خیلی بالا" — a generate_204 fetch is a
+ * page-load time (TLS to target + HTTP round trip), not a ping. Only
+ * hysteria2 profiles still come through HERE: hy2 servers have no TCP
+ * listener (UDP/QUIC-only), so a TCP dial would fake a تایم‌اوت for a server
+ * that works. The chunked measurement runs on the OFFICIAL Xray-core
+ * (XTLS/Xray-core v26.11.9) now — the PattNG fork binary is gone.
  *
  * How it works (no libv2ray on desktop — we spawn xray.exe instead):
  *
@@ -41,16 +42,8 @@ import java.util.concurrent.atomic.AtomicInteger
  *     rules that map inbound t<i> → outbound o<i>;
  *   - the chunk core starts, every inbound is awaited (hard deadline), then
  *     each server is tested by HTTP GET of the delay-test URL THROUGH its
- *     own socks inbound (gstatic generate_204 → cloudflare fallback — the
- *     same URLs the connect-flow real ping uses);
- *   - v2.3.0: the old TCP PREFILTER IS GONE. It dialled host:port with the
- *     raw system resolver + first address only (none of the v1.5.7
- *     hardening) and marked servers "timeout" that ACTUALLY WORK — the
- *     connect flow never prefilters, which is exactly why the user saw
- *     "configs connect but pings lie". A dead server now just costs its own
- *     2×6 s deadline inside the chunk core instead of a false -1;
- *   - at most 2 chunk cores run concurrently, 4 tests in parallel per chunk
- *     (8 satiated weak uplinks and inflated the numbers).
+ *     own socks inbound (gstatic generate_204 → cloudflare fallback);
+ *   - at most 2 chunk cores run concurrently, 4 tests in parallel per chunk;
  *   - every config/log/temp port lives only for the chunk's lifetime.
  *
  * Result semantics match the app-wide contract: ms > 0 = real delay through
