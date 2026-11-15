@@ -150,13 +150,14 @@ fun main(args: Array<String>) {
     println(if (bundledOk) "OK    bundled flag resource resolvable" else "FAIL  bundled flag resource")
     if (bundledOk) ok++
 
-    // 11) v2.1.0: Tor chain — buildFullConfig with a Tor port wraps the main
-    //     outbound behind a tor-chain SOCKS outbound (proxySettings.tag).
+    // 11) v2.1.0 Tor chain, v2.5.0 shape: the OFFICIAL core removed
+    //     `proxySettings` (fatal config error on Xray-core v26.11.9, verified
+    //     live) — the chain rides streamSettings.sockopt.dialerProxy now.
     val torCfg = XrayConfig.buildFullConfig(samples[1], 10808, 10809, 10810, 9050)
     val torOut = torCfg?.get("outbounds").toString()
-    val torOk = torOut.contains("\"tor-chain\"") && torOut.contains("\"proxySettings\"") &&
-        torOut.contains("127.0.0.1")
-    println(if (torOk) "OK    tor-chain config (proxySettings + socks outbound)" else "FAIL  tor-chain config")
+    val torOk = torOut.contains("\"tor-chain\"") && torOut.contains("\"dialerProxy\"") &&
+        !torOut.contains("\"proxySettings\"") && torOut.contains("127.0.0.1")
+    println(if (torOk) "OK    tor-chain config (sockopt.dialerProxy + socks outbound)" else "FAIL  tor-chain config")
     if (torOk) ok++
 
     // 12) v2.1.0: plain (no-Tor) config must NOT contain the chain
@@ -224,12 +225,19 @@ fun main(args: Array<String>) {
 
     // v2.4.0: persist the exact JSON the official Xray-core must accept, for
     // the live probe (xray run -test / end-to-end loopback traffic run).
+    // v2.5.0: also the Tor-chain config — the user reported «حالت تور وصل
+    // نمیشه»; the probe proves whether the chain shape is core-acceptable.
     try {
         java.io.File("selftest-hy2-outbound.json").writeText(
             XrayConfig.json.encodeToString(JsonObject.serializer(), hy2Out!!)
         )
         XrayConfig.buildFullConfig(plainVless, 10808, 10809, 10810)?.let {
             java.io.File("selftest-plain-config.json").writeText(
+                XrayConfig.json.encodeToString(JsonObject.serializer(), it)
+            )
+        }
+        XrayConfig.buildFullConfig(samples[1], 10808, 10809, 10810, torSocksPort = 9050)?.let {
+            java.io.File("selftest-tor-config.json").writeText(
                 XrayConfig.json.encodeToString(JsonObject.serializer(), it)
             )
         }
@@ -363,7 +371,60 @@ fun main(args: Array<String>) {
     println(if (portsOk && classOk) "OK    tunnel ports + hy2/core-ping classification" else "FAIL  ports/classification")
     if (portsOk && classOk) ok++
 
-    val expected = samples.size + 26
+    // --- v2.5.0 assertions -----------------------------------------------------
+    // 25) The dual-metric store: recordTcp overwrites with -1 on failure
+    //     (a dead server never keeps a good TCP number) and clearTestResults
+    //     wipes BOTH maps before every bulk run (v2rayNG
+    //     clearAllTestDelayResults parity).
+    // 25) The dual-metric store: recordTcp overwrites with -1 on failure
+    //     (a dead server never keeps a good TCP number) and clearTestResults
+    //     wipes BOTH maps before every bulk run (v2rayNG
+    //     clearAllTestDelayResults parity).
+    var tcpOk = false
+    run {
+        fun await(cond: () -> Boolean, ms: Long = 4000): Boolean {
+            val deadline = System.currentTimeMillis() + ms
+            while (System.currentTimeMillis() < deadline) {
+                Thread.sleep(60)
+                if (cond()) return true
+            }
+            return false
+        }
+        Store.recordTcp("selftest-tcp-id", 77)
+        val wrote = await({ Store.tcpMap["selftest-tcp-id"] == 77L })
+        Store.recordTcp("selftest-tcp-id", -1)
+        val overwrote = await({ Store.tcpMap["selftest-tcp-id"] == -1L })
+        Store.recordTcp("selftest-cleared-id", 5)
+        Store.clearTestResults()
+        val wiped = await({
+            !Store.tcpMap.containsKey("selftest-tcp-id") &&
+                !Store.tcpMap.containsKey("selftest-cleared-id") && Store.ping == null
+        })
+        tcpOk = wrote && overwrote && wiped
+    }
+    println(if (tcpOk) "OK    recordTcp -1 overwrite + clearTestResults wipe" else "FAIL  recordTcp/clearTestResults")
+    if (tcpOk) ok++
+
+    // 26) swapProfiles — the ▲▼ move buttons swap INSIDE the master list and
+    //     the order persists; unknown ids are a safe no-op.
+    var swapOk = false
+    try {
+        val orig = Store.profiles
+        val a = ProfileRec("st-a", "A", "vless", "vless://a@a:1#A")
+        val b = ProfileRec("st-b", "B", "vless", "vless://b@b:1#B")
+        Store.profiles = listOf(a, b)
+        Store.swapProfiles("st-a", "st-b")
+        val after = Store.profiles.map { it.id }
+        Store.swapProfiles("st-a", "ghost-id")
+        val noOp = Store.profiles.map { it.id } == after
+        Store.profiles = orig
+        Store.save()
+        swapOk = after == listOf("st-b", "st-a") && noOp
+    } catch (_: Throwable) { }
+    println(if (swapOk) "OK    swapProfiles (move up/down) order + persistence" else "FAIL  swapProfiles")
+    if (swapOk) ok++
+
+    val expected = samples.size + 28
     println(
         if (ok == expected && full != null) "SELFTEST PASS ($ok/$expected)"
         else "SELFTEST FAIL ($ok expected $expected)"

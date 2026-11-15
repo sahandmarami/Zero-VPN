@@ -100,10 +100,22 @@ object GeoLookup {
      *  fails (blocked networks), so the flag at least matches the intent.
      *  All writes go through [postStateWrite] (deferred EDT) — never inside
      *  a running composition (v2.0.1 crash class). */
-    fun ensureLookup(host: String?, nameHint: String? = null) {
+    fun ensureLookup(host: String?, nameHint: String? = null, force: Boolean = false) {
         val h = host?.trim() ?: return
-        if (h.isEmpty() || isPrivateHost(h) || failedHosts.contains(h)) return
+        if (h.isEmpty() || isPrivateHost(h)) return
+        if (force) {
+            // v2.5.0 — V2Box parity: while the tunnel was down a lookup may
+            // have failed or only produced a remark hint; once the tunnel
+            // carries traffic the same host gets a REAL re-lookup (the geo
+            // sources and DoH ride the tunnel). A real cached result stays.
+            failedHosts.remove(h)
+            val cached = sessionCache[h]
+            if (cached != null && cached.hint != true) return
+            sessionCache.remove(h)
+            lookingUp.remove(h)
+        }
         if (lookingUp.contains(h)) return
+        if (h in failedHosts) return
         val cached = sessionCache[h]
         if (cached != null) {
             if (byHost[h] != cached) postStateWrite { byHost[h] = cached }
@@ -125,6 +137,24 @@ object GeoLookup {
                 sessionCache[h] = null
                 failedHosts.add(h)
             }
+        }
+    }
+
+    /**
+     * v2.5.0 — re-run every lookup that failed or only produced a remark
+     * hint. Called the moment the tunnel comes up AND actually carries
+     * traffic (V2Box resolves its flags through the working tunnel; on
+     * Iranian networks the geo APIs are blocked without it, which is why
+     * flags previously stayed wrong until the next full restart).
+     */
+    fun refreshUnresolved() {
+        val hosts = (sessionCache.filterValues { it == null || it.hint == true }.keys +
+                failedHosts.toSet()).toList()
+        hosts.forEach { h ->
+            failedHosts.remove(h)
+            sessionCache.remove(h)
+            lookingUp.remove(h)
+            ensureLookup(h)
         }
     }
 

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -51,7 +52,7 @@ import kotlinx.coroutines.launch
 // SERVERS — toolbar + group tabs + subscription card + server list
 // ---------------------------------------------------------------------------
 @Composable
-fun ServersScreen(modifier: Modifier = Modifier) {
+fun ServersScreen(modifier: Modifier = Modifier, embedded: Boolean = false) {
     val t = currentTheme
     var showAddSub by remember { mutableStateOf(false) }
     var showAddManual by remember { mutableStateOf(false) }
@@ -94,16 +95,27 @@ fun ServersScreen(modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 22.dp, vertical = 18.dp)
+            .padding(horizontal = if (embedded) 14.dp else 22.dp, vertical = if (embedded) 8.dp else 18.dp)
     ) {
         // --- Toolbar ---------------------------------------------------------
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("سرورها", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = t.textPrimary)
-                Text(
-                    "${Store.profiles.size} سرور در ${Store.subscriptions.size} اشتراک",
-                    fontSize = 11.sp, color = t.textSecondary
-                )
+            if (!embedded) {
+                Column(Modifier.weight(1f)) {
+                    Text("سرورها", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = t.textPrimary)
+                    Text(
+                        "${Store.profiles.size} سرور در ${Store.subscriptions.size} اشتراک",
+                        fontSize = 11.sp, color = t.textSecondary
+                    )
+                }
+            } else {
+                // v2.5.0 — embedded under the connect hero (Android layout):
+                // a compact count line instead of the full title block.
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "${Store.profiles.size} سرور",
+                        fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = t.textPrimary
+                    )
+                }
             }
             if (showSearch) {
                 androidx.compose.material3.TextField(
@@ -241,7 +253,7 @@ fun ServersScreen(modifier: Modifier = Modifier) {
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(profiles, key = { it.id }) { p ->
+                itemsIndexed(profiles, key = { _, p -> p.id }) { idx, p ->
                     ServerRow(
                         profile = p,
                         selected = p.id == Store.selectedId,
@@ -255,6 +267,13 @@ fun ServersScreen(modifier: Modifier = Modifier) {
                         },
                         onEdit = { editTarget = p },
                         onDelete = { deleteTarget = p },
+                        onTest = { Connector.testOne(p) },
+                        onMoveUp = if (idx > 0) {
+                            { Store.swapProfiles(p.id, profiles[idx - 1].id) }
+                        } else null,
+                        onMoveDown = if (idx < profiles.lastIndex) {
+                            { Store.swapProfiles(p.id, profiles[idx + 1].id) }
+                        } else null,
                     )
                 }
                 item { Spacer(Modifier.height(60.dp)) }
@@ -455,6 +474,9 @@ private fun ServerRow(
     onShare: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onTest: () -> Unit,
+    onMoveUp: (() -> Unit)?,
+    onMoveDown: (() -> Unit)?,
 ) {
     val t = currentTheme
     Row(
@@ -487,29 +509,48 @@ private fun ServerRow(
                     overflow = TextOverflow.Ellipsis,
                     color = t.textPrimary
                 )
-                // Ping chip
-                val ms = Store.pingMap[profile.id]
-                val msColor = when {
-                    ms == null -> t.textSecondary
-                    ms > 0 && ms <= 120 -> t.pingGood
-                    ms > 0 && ms <= 400 -> t.pingMid
-                    else -> t.pingBad
-                }
-                val msText = when {
-                    ms == null -> ""
-                    ms > 0 -> "$ms ms"
-                    else -> "تایم‌اوت"
-                }
-                if (msText.isNotEmpty()) {
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(msColor.copy(alpha = 0.12f))
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        Text(msText, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = msColor)
+                // v2.5.0 — BOTH numbers per row, exactly like V2Box/v2rayNG:
+                // «پینگ» = TCP handshake (tcpMap), «تأخیر واقعی» = through the
+                // core (pingMap). A failed value (-1) shows تایم‌اوت — a dead
+                // server can never keep a good number from an older test.
+                @Composable
+                fun testChip(ms: Long?, label: String) {
+                    val color = when {
+                        ms == null -> t.textSecondary
+                        ms > 0 && ms <= 120 -> t.pingGood
+                        ms > 0 && ms <= 400 -> t.pingMid
+                        else -> t.pingBad
                     }
-                    Spacer(Modifier.width(8.dp))
+                    val text = when {
+                        ms == null -> ""
+                        ms > 0 -> if (label.isEmpty()) "$ms ms" else "$ms"
+                        else -> "تایم‌اوت"
+                    }
+                    if (text.isNotEmpty()) {
+                        Row(
+                            Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(color.copy(alpha = 0.12f))
+                                .padding(horizontal = 8.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (label.isNotEmpty() && ms != null && ms > 0) {
+                                Text(
+                                    label,
+                                    fontSize = 9.sp,
+                                    color = color.copy(alpha = 0.8f)
+                                )
+                                Spacer(Modifier.width(3.dp))
+                            }
+                            Text(text, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = color)
+                        }
+                        Spacer(Modifier.width(6.dp))
+                    }
+                }
+                testChip(Store.tcpMap[profile.id], "TCP")
+                testChip(Store.pingMap[profile.id], "واقعی")
+                IconButton(onClick = onTest, Modifier.size(32.dp)) {
+                    Icon(ZeroIcons.flash, "تست این سرور", Modifier.size(17.dp), tint = t.accent)
                 }
                 IconButton(onClick = onShare, Modifier.size(32.dp)) {
                     Icon(ZeroIcons.share, "کپی لینک", Modifier.size(17.dp), tint = t.textSecondary)
@@ -550,6 +591,21 @@ private fun ServerRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+        }
+        // v2.5.0 — the move buttons the user asked for: بیارمش پایین یا بالا.
+        // Swap inside the visible list order (group views filter the master
+        // list, so the swap lands there too and is persisted immediately).
+        if (onMoveUp != null || onMoveDown != null) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                IconButton(onClick = { onMoveUp?.invoke() }, Modifier.size(28.dp), enabled = onMoveUp != null) {
+                    Icon(ZeroIcons.arrowUp, "انتقال به بالا", Modifier.size(17.dp),
+                        tint = if (onMoveUp != null) t.textSecondary else t.textSecondary.copy(alpha = 0.3f))
+                }
+                IconButton(onClick = { onMoveDown?.invoke() }, Modifier.size(28.dp), enabled = onMoveDown != null) {
+                    Icon(ZeroIcons.arrowDown, "انتقال به پایین", Modifier.size(17.dp),
+                        tint = if (onMoveDown != null) t.textSecondary else t.textSecondary.copy(alpha = 0.3f))
+                }
             }
         }
     }
@@ -684,7 +740,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         SettingsGroup("هسته و سیستم") {
             SettingsRow(
                 title = "نسخه هسته",
-                value = Store.coreVersion ?: "PattNG Xray fork",
+                value = Store.coreVersion ?: "Xray-core رسمی",
                 onClick = { }
             )
             SettingsRow(
@@ -714,7 +770,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 
         SettingsGroup("درباره") {
             SettingsRow(title = "نسخه برنامه", value = APP_VERSION, onClick = { })
-            SettingsRow(title = "هسته", value = "Xray — فورک PattNG", onClick = { })
+            SettingsRow(title = "هسته", value = "Xray-core رسمی (XTLS/Xray-core)", onClick = { })
         }
 
         Spacer(Modifier.height(24.dp))

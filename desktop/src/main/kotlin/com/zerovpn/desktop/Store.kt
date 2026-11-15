@@ -65,11 +65,15 @@ data class DataFile(
     val settings: SettingsRec = SettingsRec(),
     val selected: String? = null,
     val pings: Map<String, Long> = emptyMap(),
+    // v2.5.0 — TCP handshake ping per profile (the V2Box/v2rayNG second
+    // column). pings[] stays the REAL delay through the core (the number
+    // that predicts whether a server actually carries traffic).
+    val tcps: Map<String, Long> = emptyMap(),
 )
 
 enum class ConnStatus { DISCONNECTED, CONNECTING, CONNECTED }
 
-const val APP_VERSION = "2.4.0"
+const val APP_VERSION = "2.5.0"
 
 /** Release page opened by the update banner. */
 const val RELEASES_URL = "https://github.com/sahandmarami/Zero-VPN/releases/latest"
@@ -176,6 +180,8 @@ object Store {
     var updateUrl by mutableStateOf<String?>(null)
 
     val pingMap = mutableStateMapOf<String, Long>()
+    /** v2.5.0 — TCP handshake ping column (V2Box style: پینگ + تأخیر واقعی). */
+    val tcpMap = mutableStateMapOf<String, Long>()
 
     var profiles: List<ProfileRec>
         get() = data.profiles
@@ -246,6 +252,7 @@ object Store {
             data = data.copy(selected = profiles.first().id)
         }
         data.pings.forEach { (k, v) -> if (v > 0) pingMap[k] = v }
+        data.tcps.forEach { (k, v) -> if (v > 0) tcpMap[k] = v }
         // Restore the last known ping of the selected server so the home
         // hero shows a number right after launch instead of "—".
         data.selected?.let { sel -> ping = pingMap[sel]?.takeIf { it > 0 } }
@@ -258,7 +265,10 @@ object Store {
 
     /** Persist the CURRENT data snapshot — IO only, no state mutation here. */
     fun save() {
-        val snapshot = data.copy(pings = pingMap.filterValues { it > 0 })
+        val snapshot = data.copy(
+            pings = pingMap.filterValues { it > 0 },
+            tcps = tcpMap.filterValues { it > 0 },
+        )
         io.launch {
             try {
                 File(dataDir, "data.json").writeText(json.encodeToString(snapshot))
@@ -389,6 +399,38 @@ object Store {
             pingMap[id] = if (ms > 0) ms else -1
             if (id == selectedId) ping = ms.takeIf { it > 0 }
         }
+    }
+
+    /** v2.5.0 — TCP handshake column; failure (-1) ALWAYS overwrites, exactly
+     *  like v2rayNG's testDelayMillis (a dead server never keeps a good
+     *  number from an older test). */
+    fun recordTcp(id: String, ms: Long) {
+        postStateWrite {
+            tcpMap[id] = if (ms > 0) ms else -1
+        }
+    }
+
+    /** v2.5.0 — v2rayNG wipes all results before every bulk test run
+     *  (clearAllTestDelayResults), so no stale number can survive a run. */
+    fun clearTestResults() {
+        postStateWrite {
+            pingMap.clear()
+            tcpMap.clear()
+            ping = null
+        }
+    }
+
+    /** v2.5.0 — swap two profiles inside the MASTER list (the group views
+     *  filter the master list, so the order carries over everywhere).
+     *  Used by the ▲▼ move buttons on the server rows (v2rayNG parity). */
+    fun swapProfiles(aId: String, bId: String) {
+        val list = data.profiles.toMutableList()
+        val a = list.indexOfFirst { it.id == aId }
+        val b = list.indexOfFirst { it.id == bId }
+        if (a < 0 || b < 0 || a == b) return
+        list[a] = list[b].also { list[b] = list[a] }
+        data = data.copy(profiles = list)
+        save()
     }
 }
 

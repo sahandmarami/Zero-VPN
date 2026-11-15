@@ -178,6 +178,11 @@ object Connector {
                     "اتصال برقرار شد اما ترافیک از سرور عبور نمی‌کند — " +
                         "این سرور را عوض کنید یا «تست پینگ» را بگیرید"
                 )
+            } else {
+                // v2.5.0 — V2Box-style flags: the tunnel works, so every host
+                // whose flag was missing or only a remark hint gets a REAL
+                // re-lookup with the geo sources riding the tunnel.
+                GeoLookup.refreshUnresolved()
             }
         }
     }
@@ -286,61 +291,79 @@ object Connector {
         }
     }
 
-    /** hysteria2 profiles have no TCP listener (UDP/QUIC-only) — only they
-     *  are measured through the core; everything else is a plain TCP dial. */
+    /**
+     * v2.5.0 — hysteria2 (and any QUIC-only) profiles have NO TCP listener:
+     * they skip the TCP prefilter and go straight to the core delay test,
+     * exactly like v2rayNG's RealPingWorkerService.
+     */
     fun usesCorePing(p: ProfileRec): Boolean = p.proto == "hysteria2"
 
     /**
-     * v2.4.0 — V2Box/v2rayNG-STYLE LIST PING. The user rejected the
-     * through-the-core numbers («پینگ رو اشتباه میده و عدد خیلی بالایی
-     * میده»): a generate_204 fetch includes TLS-to-target + HTTP round trip,
-     * which is a page-load time, not a ping — other apps show the TCP
-     * handshake RTT and that is what this list now shows too:
+     * v2.5.0 — THE LIST PING, done the REAL v2rayNG/V2Box way (the user
+     * rejected the previous scheme twice: through-the-core numbers alone
+     * looked «خیلی بالا», and TCP-only numbers LIED — poisoned DNS hands out
+     * fake IPs that accept the handshake fast, so dead servers showed great
+     * pings while connect-but-no-traffic rows piled up. Real v2rayNG solves
+     * this with BOTH numbers, and so do we now, per row like V2Box:
      *
-     *  - every TCP-based profile: PingTest.tcpBounded — the server's REAL
-     *    address (DoH answered FIRST, poisoned system resolver second), all
-     *    IPs IPv4-first, 5 s deadline per dial, 6 servers in parallel;
-     *  - hysteria2 profiles: NO TCP listener (UDP/QUIC-only) — they keep the
-     *    through-the-core delay via CorePing (chunked official core), so a
-     *    hy2 row never shows a fake تایم‌اوت;
-     *  - a failed dial records -1 (تایم‌اوت) — a stale number from an older
-     *    test never survives a dead server.
+     *  - «پینگ» (tcpMap): TCP handshake RTT, all resolved addresses IPv4-first
+     *    with the DoH answer dialled FIRST (poisoned system resolver second);
+     *    it also serves as the 1.5 s prefilter — a server that answers no
+     *    dial is تایم‌اوت immediately and never spins a chunk core (v2rayNG:
+     *    socketConnectTime(..., 1000) → retFailure);
+     *  - «تأخیر واقعی» (pingMap): REAL delay THROUGH THE CORE for every
+     *    surviving server (chunked official core, per-server private socks
+     *    inbound, gstatic → cloudflare generate_204) — the number that
+     *    actually predicts "connects AND carries traffic"; QUIC-only hy2
+     *    profiles skip the prefilter and go straight here;
+     *  - ALL results are wiped before every run and -1 ALWAYS overwrites
+     *    (v2rayNG: clearAllTestDelayResults + testDelayMillis = result) — a
+     *    dead server can never keep a good number from an older test.
      */
     fun testAll() {
         if (Store.testing || Store.profiles.isEmpty()) return
         Store.testing = true
         Store.ui.launch {
+            Store.clearTestResults()
             val total = Store.profiles.size
             val done = java.util.concurrent.atomic.AtomicInteger(0)
-            fun bump() {
+            fun bumpPhaseA() {
                 val d = done.incrementAndGet()
                 postStateWrite { Store.busyMsg = "در حال تست پینگ سرورها… $d/$total" }
             }
             postStateWrite { Store.busyMsg = "در حال تست پینگ سرورها… 0/$total" }
             try {
-                val tcp = Store.profiles.filter { !usesCorePing(it) }
-                val hy2 = Store.profiles.filter { usesCorePing(it) }
+                // Phase A — TCP handshake column + prefilter.
+                val survivors = java.util.Collections.synchronizedList(mutableListOf<ProfileRec>())
                 kotlinx.coroutines.coroutineScope {
                     val sem = Semaphore(6)
-                    val tcpJobs = tcp.mapNotNull { p ->
-                        ServerInfo.hostPort(p.link)?.let { (host, port) ->
-                            launch(Dispatchers.IO) {
-                                sem.withPermit {
-                                    Store.recordPing(p.id, PingTest.tcpBounded(host, port))
-                                    bump()
+                    Store.profiles.forEach { p ->
+                        launch(Dispatchers.IO) {
+                            sem.withPermit {
+                                if (usesCorePing(p)) {
+                                    survivors += p
+                                    bumpPhaseA()
+                                    return@withPermit
                                 }
+                                val hp = ServerInfo.hostPort(p.link)
+                                val tcpMs = if (hp == null) -1L
+                                else PingTest.tcpBounded(hp.first, hp.second, 1500)
+                                Store.recordTcp(p.id, tcpMs)
+                                if (tcpMs < 0) Store.recordPing(p.id, -1L)
+                                else survivors += p
+                                bumpPhaseA()
                             }
                         }
                     }
-                    val hy2Job = if (hy2.isEmpty()) null else launch(Dispatchers.IO) {
-                        CorePing.testAll(
-                            hy2,
-                            record = { id, ms -> Store.recordPing(id, ms) },
-                            progress = { _, _ -> bump() },
-                        )
-                    }
-                    tcpJobs.joinAll()
-                    hy2Job?.join()
+                }
+                // Phase B — REAL delay through the core for every survivor.
+                if (survivors.isNotEmpty()) {
+                    postStateWrite { Store.busyMsg = "در حال اندازه‌گیری تأخیر واقعی (از طریق هسته)…" }
+                    CorePing.testAll(
+                        survivors.toList(),
+                        record = { id, ms -> Store.recordPing(id, ms) },
+                        progress = { _, _ -> },
+                    )
                 }
             } catch (t: Throwable) {
                 Store.toast("خطا در تست سرورها: ${t.message?.take(80) ?: t.javaClass.simpleName}")
@@ -349,6 +372,41 @@ object Connector {
             Store.testing = false
             Store.save()
             Store.toast("تست پینگ تمام شد")
+        }
+    }
+
+    /**
+     * v2.5.0 — single-row test (the «تست» button on each server row):
+     * TCP handshake + real delay through the core for ONE profile only.
+     */
+    fun testOne(p: ProfileRec) {
+        if (Store.testing) return
+        Store.testing = true
+        Store.ui.launch {
+            postStateWrite { Store.busyMsg = "در حال تست «${p.name.take(22)}»…" }
+            try {
+                if (!usesCorePing(p)) {
+                    val hp = ServerInfo.hostPort(p.link)
+                    val tcpMs = if (hp == null) -1L
+                    else PingTest.tcpBounded(hp.first, hp.second, 1500)
+                    Store.recordTcp(p.id, tcpMs)
+                    if (tcpMs < 0) {
+                        Store.recordPing(p.id, -1L)
+                        return@launch
+                    }
+                }
+                CorePing.testAll(
+                    listOf(p),
+                    record = { id, ms -> Store.recordPing(id, ms) },
+                    progress = { _, _ -> },
+                )
+            } catch (t: Throwable) {
+                Store.toast("خطا در تست سرور: ${t.message?.take(80) ?: t.javaClass.simpleName}")
+            }
+            postStateWrite { Store.busyMsg = null }
+            Store.testing = false
+            Store.save()
+            Store.toast("تست «${p.name.take(22)}» تمام شد")
         }
     }
 

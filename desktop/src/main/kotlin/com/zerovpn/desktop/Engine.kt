@@ -50,11 +50,22 @@ object XrayConfig {
                 put("tag", "proxy")
                 put("protocol", outbound["protocol"]?.toString()?.trim('"') ?: "")
                 put("settings", outbound["settings"] ?: buildJsonObject { })
-                put("streamSettings", outbound["streamSettings"] ?: buildJsonObject { })
-                outbound["mux"]?.let { put("mux", it) }
-                put("proxySettings", buildJsonObject {
-                    put("tag", "tor-chain")
+                // v2.5.0 — THE TOR FIX (the user: روی حالت تور میزنم وصل شه
+                // وصل نمیشه). The OFFICIAL Xray-core REMOVED outbound
+                // `proxySettings` ("migrated to streamSettings.sockopt.
+                // dialerProxy") — the v2.1.0 chain was built for the PattNG
+                // fork, so on the real core the whole config was REJECTED at
+                // start and Tor mode could never connect. The chain now
+                // rides streamSettings.sockopt.dialerProxy, the core's own
+                // migration shape.
+                val stream = outbound["streamSettings"] as? JsonObject ?: buildJsonObject { }
+                put("streamSettings", buildJsonObject {
+                    stream.forEach { (k, v) -> if (k != "sockopt") put(k, v) }
+                    put("sockopt", buildJsonObject {
+                        put("dialerProxy", "tor-chain")
+                    })
                 })
+                outbound["mux"]?.let { put("mux", it) }
             }
         } else outbound
         return buildJsonObject {

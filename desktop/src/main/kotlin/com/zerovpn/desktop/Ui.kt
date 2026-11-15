@@ -30,6 +30,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -67,12 +70,17 @@ import kotlinx.coroutines.isActive
 // phone-style bottom goo bar): RTL puts the sidebar on the right edge.
 // ---------------------------------------------------------------------------
 enum class ZeroTab(val key: String, val label: String, val icon: ImageVector) {
-    HOME("home", "خانه", ZeroIcons.home),
-    SERVERS("servers", "سرورها", ZeroIcons.locations),
+    MAIN("main", "سرورها", ZeroIcons.locations),
     SETTINGS("settings", "تنظیمات", ZeroIcons.settings),
     LOGS("logs", "گزارش", ZeroIcons.logFile),
 }
 
+/**
+ * v2.5.0 — the app shell is now the ANDROID layout (user: رابط کاربری مثل
+ * نسخهٔ اندروید): the main screen = connect card on top + server list below,
+ * a bottom navigation bar with the three v2rayNG tabs (سرورها / تنظیمات /
+ * گزارش) instead of the desktop sidebar.
+ */
 @Composable
 fun ZeroApp() {
     ZeroTheme {
@@ -80,14 +88,12 @@ fun ZeroApp() {
             LocalLayoutDirection provides LayoutDirection.Rtl,
             LocalTextStyle provides TextStyle(fontFamily = zeroFontFamily, color = colorTextPrimary),
         ) {
-            Row(Modifier.fillMaxSize().background(currentTheme.bgBase)) {
-                ZeroSidebar()
-                Box(Modifier.weight(1f).fillMaxHeight()) {
-                    when (Store.view) {
-                        "servers" -> ServersScreen()
-                        "settings" -> SettingsScreen()
-                        "logs" -> LogsScreen()
-                        else -> HomeScreen()
+            Column(Modifier.fillMaxSize().background(currentTheme.bgBase)) {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    when {
+                        Store.view == "settings" -> SettingsScreen()
+                        Store.view == "logs" -> LogsScreen()
+                        else -> MainScreen() // "main" + legacy "home"/"servers"
                     }
 
                     Store.busyMsg?.let { msg ->
@@ -97,6 +103,7 @@ fun ZeroApp() {
                         ToastBanner(msg, Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp))
                     }
                 }
+                ZeroBottomNav()
             }
         }
     }
@@ -127,143 +134,57 @@ fun ZeroTheme(content: @Composable () -> Unit) {
 }
 
 // ---------------------------------------------------------------------------
-// Sidebar
+// Bottom navigation — the v2rayNG Android tabs (سرورها / تنظیمات / گزارش)
 // ---------------------------------------------------------------------------
 @Composable
-fun ZeroSidebar() {
+fun ZeroBottomNav() {
     val t = currentTheme
-    Column(
-        modifier = Modifier
-            .width(224.dp)
-            .fillMaxHeight()
-            .background(t.sidebarBg)
-            .border(width = 1.dp, color = t.cardBorder)
-            .padding(14.dp)
+    NavigationBar(
+        containerColor = t.sidebarBg,
+        contentColor = t.textPrimary,
+        tonalElevation = 0.dp,
     ) {
-        // Brand — v2.1.0: gradient plate behind the logo (aurora identity)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(11.dp))
-                    .background(heroGradient)
-                    .padding(5.dp)
-            ) {
-                val logoPainter = remember { loadLogoPainter() }
-                logoPainter?.let {
-                    Image(painter = it, contentDescription = null, modifier = Modifier.fillMaxSize())
-                }
-            }
-            Spacer(Modifier.width(9.dp))
-            Column {
-                Text("Zero VPN", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = t.textPrimary)
-                Text(
-                    "نسخه $APP_VERSION",
-                    fontSize = 10.sp,
-                    color = t.textSecondary
-                )
-            }
-        }
-
-        Spacer(Modifier.height(6.dp))
-
-        // Live status line
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            val (dotColor, label) = when (Store.status) {
-                ConnStatus.CONNECTED -> t.statusOk to "متصل"
-                ConnStatus.CONNECTING -> t.pingMid to "در حال اتصال…"
-                ConnStatus.DISCONNECTED -> t.statusIdle to "قطع"
-            }
-            Box(
-                Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(dotColor)
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(label, fontSize = 12.sp, color = t.textSecondary)
-        }
-
-        Spacer(Modifier.height(16.dp))
-        Box(
-            Modifier.fillMaxWidth().height(1.dp).background(t.divider)
-        )
-        Spacer(Modifier.height(12.dp))
-
         ZeroTab.entries.forEach { tab ->
-            ZeroNavRow(
-                tab = tab,
-                selected = Store.view == tab.key,
-                onClick = { Store.view = tab.key }
+            NavigationBarItem(
+                selected = Store.view == tab.key ||
+                        (tab == ZeroTab.MAIN && Store.view !in setOf("settings", "logs")),
+                onClick = { Store.view = tab.key },
+                icon = {
+                    Icon(
+                        tab.icon,
+                        contentDescription = tab.label,
+                        tint = if (Store.view == tab.key ||
+                            (tab == ZeroTab.MAIN && Store.view !in setOf("settings", "logs"))
+                        ) t.accent else t.textSecondary
+                    )
+                },
+                label = { Text(tab.label, fontSize = 11.sp) },
+                colors = NavigationBarItemDefaults.colors(
+                    indicatorColor = t.accent.copy(alpha = 0.14f)
+                ),
             )
-        }
-
-        Spacer(Modifier.weight(1f))
-
-        // Core provenance footer
-        Column(Modifier.fillMaxWidth()) {
-            Text(
-                "هسته: فورک PattNG از Xray",
-                fontSize = 10.sp,
-                color = t.textSecondary
-            )
-            Store.coreVersion?.let {
-                Text("نسخه هسته: $it", fontSize = 10.sp, color = t.textSecondary)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ZeroNavRow(tab: ZeroTab, selected: Boolean, onClick: () -> Unit) {
-    val t = currentTheme
-    val interaction = remember { MutableInteractionSource() }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 3.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) heroGradient else SolidColor(Color.Transparent))
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = tab.icon,
-            contentDescription = tab.label,
-            tint = if (selected) Color.White else t.textSecondary,
-            modifier = Modifier.size(20.dp)
-        )
-        Spacer(Modifier.width(10.dp))
-        Text(
-            tab.label,
-            fontSize = 14.sp,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-            color = if (selected) Color.White else t.textPrimary
-        )
-        Spacer(Modifier.weight(1f))
-        if (tab == ZeroTab.SERVERS && Store.profiles.isNotEmpty()) {
-            Box(
-                Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(if (selected) Color.White.copy(alpha = 0.25f) else t.pillBg)
-                    .padding(horizontal = 8.dp, vertical = 2.dp)
-            ) {
-                Text(
-                    Store.profiles.size.toString(),
-                    fontSize = 11.sp,
-                    color = if (selected) Color.White else t.textSecondary
-                )
-            }
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Home screen
+// Main screen — v2rayNG Android layout: connect hero on top, server list below
 // ---------------------------------------------------------------------------
 @Composable
-fun HomeScreen(modifier: Modifier = Modifier) {
+fun MainScreen(modifier: Modifier = Modifier) {
+    Column(modifier = modifier.fillMaxSize()) {
+        ConnectHero()
+        Box(Modifier.fillMaxWidth().height(1.dp).background(currentTheme.divider))
+        ServersScreen(embedded = true, modifier = Modifier.weight(1f))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Connect hero — the v2rayNG Android top card: connect button, status, the
+// selected server and the live stats row, with the server list right below.
+// ---------------------------------------------------------------------------
+@Composable
+fun ConnectHero(modifier: Modifier = Modifier) {
     val t = currentTheme
 
     // Connection uptime ticker.
@@ -287,17 +208,16 @@ fun HomeScreen(modifier: Modifier = Modifier) {
 
     Column(
         modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 22.dp, vertical = 18.dp)
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 12.dp)
     ) {
-        // --- Update banner (v2.1.0) ----------------------------------------
+        // --- Update banner ---------------------------------------------------
         Store.updateVersion?.let { ver ->
             UpdateBanner(version = ver, onDownload = { Connector.openReleasePage() })
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
         }
 
-        // --- Connection hero card ------------------------------------------
+        // --- Connection hero card -------------------------------------------
         ZeroCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ZeroConnectButton(
@@ -306,7 +226,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                     isTesting = isTesting,
                     onClick = { Connector.toggle() }
                 )
-                Spacer(Modifier.width(22.dp))
+                Spacer(Modifier.width(20.dp))
                 Column(
                     Modifier.weight(1f),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -317,32 +237,33 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                         connected -> "متصل" to t.statusOk
                         else -> "قطع" to t.textSecondary
                     }
-                    Text(word, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = wordColor)
+                    Text(word, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = wordColor)
+
+                    Spacer(Modifier.height(4.dp))
+
+                    // Real delay of the selected server (through the tunnel
+                    // when connected; the stored core test result otherwise).
+                    val delay = Store.ping
+                    val delayColor = when {
+                        delay == null -> t.textSecondary
+                        delay > 0 && delay <= 120 -> t.pingGood
+                        delay > 0 && delay <= 400 -> t.pingMid
+                        delay > 0 -> t.pingBad
+                        else -> t.pingBad
+                    }
+                    Text(
+                        text = when {
+                            isTesting -> "…"
+                            delay == null -> "تأخیر واقعی: —"
+                            delay > 0 -> "تأخیر واقعی: $delay ms"
+                            else -> "تأخیر واقعی: تایم‌اوت"
+                        },
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = delayColor
+                    )
 
                     Spacer(Modifier.height(6.dp))
-
-                    // Big ping number
-                    val shownDelay = Store.ping?.takeIf { it >= 0 }
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Text(
-                            text = if (isTesting) "…" else shownDelay?.toString() ?: "—",
-                            fontSize = 40.sp,
-                            fontWeight = FontWeight.Black,
-                            color = if (connected) t.accent else t.textPrimary,
-                            lineHeight = 42.sp
-                        )
-                        if (!isTesting && shownDelay != null) {
-                            Spacer(Modifier.width(5.dp))
-                            Text(
-                                "ms",
-                                fontSize = 14.sp,
-                                color = t.textSecondary,
-                                modifier = Modifier.padding(bottom = 7.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.height(8.dp))
                     val sel = Store.selectedProfile
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val host = sel?.let { ServerInfo.hostPort(it.link)?.first }
@@ -378,104 +299,40 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             }
         }
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(10.dp))
 
-        // --- Stats grid ------------------------------------------------------
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        // --- Stats row (compact, v2rayNG-style) ------------------------------
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatCard(
+                icon = ZeroIcons.download,
+                title = "دریافت",
+                value = trafficSpeed(TrafficTracker.downSpeed),
+                modifier = Modifier.weight(1f)
+            )
+            StatCard(
+                icon = ZeroIcons.upload,
+                title = "ارسال",
+                value = trafficSpeed(TrafficTracker.upSpeed),
+                modifier = Modifier.weight(1f)
+            )
             StatCard(
                 icon = ZeroIcons.speed,
-                title = "پینگ",
+                title = "تأخیر",
                 value = Store.ping?.takeIf { it > 0 }?.let { "$it ms" } ?: "—",
                 modifier = Modifier.weight(1f)
             )
             StatCard(
                 icon = ZeroIcons.clock,
-                title = "زمان اتصال",
+                title = "زمان",
                 value = uptimeText,
                 modifier = Modifier.weight(1f)
             )
         }
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            StatCard(
-                icon = ZeroIcons.upload,
-                title = "ارسال",
-                value = trafficSpeed(TrafficTracker.upSpeed),
-                sub = "کل: ${trafficString(TrafficTracker.upTotal)}",
-                modifier = Modifier.weight(1f)
-            )
-            StatCard(
-                icon = ZeroIcons.download,
-                title = "دریافت",
-                value = trafficSpeed(TrafficTracker.downSpeed),
-                sub = "کل: ${trafficString(TrafficTracker.downTotal)}",
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Spacer(Modifier.height(14.dp))
-
-        // --- Quality row (jitter / loss) -------------------------------------
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            StatCard(
-                icon = ZeroIcons.wave,
-                title = "جیتر",
-                value = ZeroStatsTracker.jitterMs?.let { "$it ms" } ?: "—",
-                modifier = Modifier.weight(1f)
-            )
-            StatCard(
-                icon = ZeroIcons.shield,
-                title = "اتلاف بسته",
-                value = "${ZeroStatsTracker.lossPercent}%",
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Spacer(Modifier.height(14.dp))
-
-        // --- Quick actions ---------------------------------------------------
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            ZeroActionButton(
-                icon = ZeroIcons.flash,
-                label = if (connected) "تست پینگ فعلی" else "تست همه سرورها",
-                primary = false,
-                onClick = {
-                    if (connected) Connector.pingCurrent() else Connector.testAll()
-                },
-                modifier = Modifier.weight(1f)
-            )
-            ZeroActionButton(
-                icon = ZeroIcons.locations,
-                label = "تغییر سرور",
-                primary = true,
-                onClick = { Store.view = "servers" },
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Spacer(Modifier.height(14.dp))
-
-        // --- Current server card --------------------------------------------
-        val sel = Store.selectedProfile
-        val host = sel?.let { ServerInfo.hostPort(it.link)?.first }
-        val geo = host?.let { GeoLookup.byHost[it] }
-        val countryLine = listOf(geo?.ip ?: host).filterNotNull().joinToString("  ·  ")
-        ZeroServerCard(
-            serverName = sel?.name ?: "هیچ سروری انتخاب نشده",
-            flagCode = geo?.cc,
-            countryLabel = countryLine,
-            pingMillis = sel?.let { Store.pingMap[it.id] },
-            quota = Store.selectedQuota,
-            onClick = { Store.view = "servers" },
-            modifier = Modifier
-        )
 
         Store.errorMsg?.let {
             Spacer(Modifier.height(10.dp))
             Text(it, fontSize = 12.sp, color = t.pingBad, textAlign = TextAlign.Center)
         }
-
-        Spacer(Modifier.height(20.dp))
     }
 }
 

@@ -47,6 +47,14 @@ object ZeroIcons {
         vec("ZeroFlash", "M7,2v11h3v9l7,-12h-4l4,-8z")
     }
 
+    /** v2.5.0 — row move buttons (v2rayNG moveServer parity) */
+    val arrowUp: ImageVector by lazy {
+        vec("ZeroArrowUp", "M7.41,15.41L12,10.83L16.59,15.41L18,14L12,8L6,14L7.41,15.41Z")
+    }
+    val arrowDown: ImageVector by lazy {
+        vec("ZeroArrowDown", "M7.41,8.59L12,13.17L16.59,8.59L18,10L12,16L6,10L7.41,8.59Z")
+    }
+
     /** ic_zero_chevron_right_24dp */
     val chevron: ImageVector by lazy {
         vec(
